@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=500, initial-scale=1.0">
+    <title>Multi-Text Clipboard Manager</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>📋 Text Manager</h1>
+            <button id="addTextBtn" class="add-btn" title="Add new text">
+                <span>+</span>
+            </button>
+        </header>
+        
+        <div class="search-container">
+            <input type="text" id="searchInput" placeholder="Search texts..." class="search-input">
+        </div>
+        
+        <div class="texts-container" id="textsContainer">
+            <!-- Texts will be dynamically added here -->
+        </div>
+        
+        <div class="empty-state" id="emptyState">
+            <div class="empty-icon">📝</div>
+            <p>No texts saved yet</p>
+            <p class="empty-subtitle">Click the + button to add your first text</p>
+        </div>
+    </div>
+    
+    <!-- Add/Edit Modal -->
+    <div class="modal" id="textModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">Add New Text</h2>
+                <button class="close-btn" id="closeModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <textarea id="textInput" placeholder="Enter your text here..." rows="6"></textarea>
+                <div class="modal-actions">
+                    <button id="saveTextBtn" class="save-btn">Save</button>
+                    <button id="cancelBtn" class="cancel-btn">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="popup.js"></script>
+</body>
+</html>

@@ -43,6 +43,19 @@ body {
     align-items: center;
 }
 
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.header-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
 .header h1 {
     font-size: 20px;
     font-weight: 600;
@@ -104,19 +117,37 @@ body {
     transition: all 0.3s ease;
     cursor: pointer;
     position: relative;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
 }
 
-.text-item:hover {
-    background: #e3f2fd;
-    border-color: #667eea;
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+.drag-handle {
+    color: #999;
+    font-size: 16px;
+    line-height: 1;
+    cursor: grab;
+    user-select: none;
+    padding: 4px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+    margin-top: 2px;
 }
 
-.text-item.selected {
-    background: #e3f2fd;
-    border-color: #667eea;
-    box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+.drag-handle:hover {
+    color: #667eea;
+    background: rgba(102, 126, 234, 0.1);
+}
+
+.drag-handle:active {
+    cursor: grabbing;
+}
+
+.text-content-wrapper {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
 }
 
 .text-content {
@@ -132,11 +163,52 @@ body {
     -webkit-box-orient: vertical;
 }
 
+.text-item:hover {
+    background: #e3f2fd;
+    border-color: #667eea;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+}
+
+.text-item.selected {
+    background: #e3f2fd;
+    border-color: #667eea;
+    box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+}
+
+.text-item.dragging {
+    opacity: 0.5;
+    transform: rotate(2deg);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+    z-index: 1000;
+}
+
+.text-item.drag-over {
+    border-color: #4caf50;
+    background: #f1f8e9;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(76, 175, 80, 0.2);
+}
+
+.text-item.drag-over::before {
+    content: '';
+    position: absolute;
+    left: -2px;
+    top: -2px;
+    right: -2px;
+    bottom: -2px;
+    border: 2px dashed #4caf50;
+    border-radius: 10px;
+    pointer-events: none;
+}
+
 .text-actions {
     display: flex;
     gap: 8px;
     opacity: 0;
     transition: opacity 0.3s ease;
+    flex-shrink: 0;
+    margin-top: 8px;
 }
 
 .text-item:hover .text-actions {

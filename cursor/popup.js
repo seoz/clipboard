@@ -130,6 +130,18 @@ class TextManager {
         }
     }
 
+    async reorderTexts(fromIndex, toIndex) {
+        // Remove the item from its current position
+        const [movedItem] = this.texts.splice(fromIndex, 1);
+        // Insert it at the new position
+        this.texts.splice(toIndex, 0, movedItem);
+        
+        // Save the new order
+        await this.saveTexts();
+        // Re-render to update the UI
+        this.renderTexts();
+    }
+
     async copyToClipboard(text) {
         try {
             await navigator.clipboard.writeText(text);
@@ -234,20 +246,60 @@ class TextManager {
         this.texts.forEach((text, index) => {
             const textItem = document.createElement('div');
             textItem.className = 'text-item';
+            textItem.draggable = true;
+            textItem.dataset.index = index;
             textItem.innerHTML = `
-                <div class="text-content">${this.escapeHtml(text)}</div>
-                <div class="text-actions">
-                    <button class="action-btn copy-btn" data-action="copy" data-index="${index}">
-                        📋 Copy
-                    </button>
-                    <button class="action-btn edit-btn" data-action="edit" data-index="${index}">
-                        ✏️ Edit
-                    </button>
-                    <button class="action-btn delete-btn" data-action="delete" data-index="${index}">
-                        🗑️ Delete
-                    </button>
+                <div class="drag-handle" title="Drag to reorder">⋮⋮</div>
+                <div class="text-content-wrapper">
+                    <div class="text-content">${this.escapeHtml(text)}</div>
+                    <div class="text-actions">
+                        <button class="action-btn copy-btn" data-action="copy" data-index="${index}">
+                            📋 Copy
+                        </button>
+                        <button class="action-btn edit-btn" data-action="edit" data-index="${index}">
+                            ✏️ Edit
+                        </button>
+                        <button class="action-btn delete-btn" data-action="delete" data-index="${index}">
+                            🗑️ Delete
+                        </button>
+                    </div>
                 </div>
             `;
+
+            // Add drag and drop handlers
+            textItem.addEventListener('dragstart', (e) => {
+                e.dataTransfer.setData('text/plain', index);
+                textItem.classList.add('dragging');
+            });
+
+            textItem.addEventListener('dragend', (e) => {
+                textItem.classList.remove('dragging');
+                // Remove all drag-over classes
+                document.querySelectorAll('.text-item').forEach(item => {
+                    item.classList.remove('drag-over');
+                });
+            });
+
+            textItem.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                textItem.classList.add('drag-over');
+            });
+
+            textItem.addEventListener('dragleave', (e) => {
+                textItem.classList.remove('drag-over');
+            });
+
+            textItem.addEventListener('drop', (e) => {
+                e.preventDefault();
+                textItem.classList.remove('drag-over');
+                
+                const draggedIndex = parseInt(e.dataTransfer.getData('text/plain'));
+                const targetIndex = parseInt(textItem.dataset.index);
+                
+                if (draggedIndex !== targetIndex) {
+                    this.reorderTexts(draggedIndex, targetIndex);
+                }
+            });
 
             // Add click handlers
             textItem.addEventListener('click', (e) => {
@@ -266,8 +318,8 @@ class TextManager {
                             this.deleteText(index);
                             break;
                     }
-                } else {
-                    // Click on text item itself - copy to clipboard
+                } else if (!e.target.classList.contains('drag-handle')) {
+                    // Click on text item itself - copy to clipboard (but not on drag handle)
                     this.copyToClipboard(text);
                 }
             });

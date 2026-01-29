@@ -15,10 +15,88 @@ class TextManager {
         this.updateEmptyState();
     }
 
+    async exportTexts() {
+        if (this.texts.length === 0) {
+            alert('No texts to export!');
+            return;
+        }
+
+        const data = JSON.stringify(this.texts, null, 2);
+        const blob = new Blob([data], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'clipboard-backup.json';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    async importTexts(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            try {
+                const importedTexts = JSON.parse(e.target.result);
+                if (!Array.isArray(importedTexts)) {
+                    throw new Error('Invalid format: file must contain an array of strings');
+                }
+
+                // Append new texts
+                let addedCount = 0;
+                for (const text of importedTexts) {
+                    if (typeof text === 'string' && text.trim().length > 0) {
+                        if (this.texts.length < this.maxTexts) {
+                            this.texts.push(text.trim());
+                            addedCount++;
+                        }
+                    }
+                }
+
+                await this.saveTexts();
+                this.renderTexts();
+                this.updateEmptyState();
+
+                // Reset file input
+                event.target.value = '';
+
+                if (addedCount > 0) {
+                    alert(`Successfully imported ${addedCount} texts.`);
+                } else if (this.texts.length >= this.maxTexts) {
+                    alert(`Storage full! Maximum ${this.maxTexts} texts allowed. Some texts might not have been imported.`);
+                } else {
+                    alert('No valid texts found in file.');
+                }
+
+            } catch (error) {
+                console.error('Import error:', error);
+                alert('Error importing file: ' + error.message);
+                event.target.value = ''; // Reset on error too
+            }
+        };
+        reader.readAsText(file);
+    }
+
     setupEventListeners() {
-        // Add text button
         document.getElementById('addTextBtn').addEventListener('click', () => {
             this.openModal();
+        });
+
+        // Export functionality
+        document.getElementById('exportBtn').addEventListener('click', () => {
+            this.exportTexts();
+        });
+
+        // Import functionality
+        document.getElementById('importBtn').addEventListener('click', () => {
+            document.getElementById('fileInput').click();
+        });
+
+        document.getElementById('fileInput').addEventListener('change', (e) => {
+            this.importTexts(e);
         });
 
         // Search functionality

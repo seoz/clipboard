@@ -13,9 +13,18 @@
                 <img src="icons/icon32.png" alt="Clipboard Manager" class="header-icon">
                 <h1>Text Manager</h1>
             </div>
-            <button id="addTextBtn" class="add-btn" title="Add new text">
-                <span>+</span>
-            </button>
+            <div class="header-actions">
+                <button id="importBtn" class="icon-btn" title="Import texts from file">
+                    <span class="icon">📂</span>
+                </button>
+                <button id="exportBtn" class="icon-btn" title="Export texts to file">
+                    <span class="icon">💾</span>
+                </button>
+                <button id="addTextBtn" class="add-btn" title="Add new text">
+                    <span>+</span>
+                </button>
+            </div>
+            <input type="file" id="fileInput" accept=".json" style="display: none;">
         </header>
         
         <div class="search-container">

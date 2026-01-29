@@ -1,6 +1,7 @@
 class TextManager {
     constructor() {
         this.texts = [];
+        this.selectedIndex = -1;
         this.editingIndex = -1;
         this.maxTexts = 20;
         this.init();
@@ -9,6 +10,7 @@ class TextManager {
     async init() {
         await this.loadTexts();
         this.setupEventListeners();
+        this.setupKeyboardNavigation();
         this.renderTexts();
         this.updateEmptyState();
     }
@@ -21,6 +23,7 @@ class TextManager {
 
         // Search functionality
         document.getElementById('searchInput').addEventListener('input', (e) => {
+            this.selectedIndex = -1; // Reset selection on search
             this.filterTexts(e.target.value);
         });
 
@@ -50,6 +53,55 @@ class TextManager {
                 this.closeModal();
             }
         });
+    }
+
+    setupKeyboardNavigation() {
+        document.addEventListener('keydown', (e) => {
+            // Ignore if modal is open
+            if (document.getElementById('textModal').style.display === 'block') return;
+
+            const visibleItems = Array.from(document.querySelectorAll('.text-item'))
+                .filter(item => item.style.display !== 'none');
+
+            if (visibleItems.length === 0) return;
+
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                this.selectedIndex++;
+                if (this.selectedIndex >= visibleItems.length) {
+                    this.selectedIndex = 0; // Loop back to top
+                }
+                this.updateSelectionVisuals(visibleItems);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                this.selectedIndex--;
+                if (this.selectedIndex < 0) {
+                    this.selectedIndex = visibleItems.length - 1; // Loop to bottom
+                }
+                this.updateSelectionVisuals(visibleItems);
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (this.selectedIndex >= 0 && this.selectedIndex < visibleItems.length) {
+                    const selectedItem = visibleItems[this.selectedIndex];
+                    const index = parseInt(selectedItem.dataset.index);
+                    this.copyToClipboard(this.texts[index]);
+                }
+            }
+        });
+    }
+
+    updateSelectionVisuals(visibleItems) {
+        // Remove selected class from all items
+        document.querySelectorAll('.text-item').forEach(item => {
+            item.classList.remove('selected');
+        });
+
+        // Add selected class to current index
+        if (this.selectedIndex >= 0 && this.selectedIndex < visibleItems.length) {
+            const selectedItem = visibleItems[this.selectedIndex];
+            selectedItem.classList.add('selected');
+            selectedItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
     }
 
     async loadTexts() {
@@ -135,17 +187,19 @@ class TextManager {
         const [movedItem] = this.texts.splice(fromIndex, 1);
         // Insert it at the new position
         this.texts.splice(toIndex, 0, movedItem);
-        
+
         // Save the new order
         await this.saveTexts();
         // Re-render to update the UI
         this.renderTexts();
+        this.selectedIndex = -1; // Reset selection after reorder
     }
 
     async copyToClipboard(text) {
         try {
             await navigator.clipboard.writeText(text);
             this.showCopyNotification();
+            setTimeout(() => window.close(), 100); // Close after a short delay to show notification
         } catch (error) {
             console.error('Error copying to clipboard:', error);
             // Fallback for older browsers
@@ -162,15 +216,16 @@ class TextManager {
         document.body.appendChild(textArea);
         textArea.focus();
         textArea.select();
-        
+
         try {
             document.execCommand('copy');
             this.showCopyNotification();
+            setTimeout(() => window.close(), 100); // Close after a short delay
         } catch (error) {
             console.error('Fallback copy failed:', error);
             alert('Failed to copy to clipboard');
         }
-        
+
         document.body.removeChild(textArea);
     }
 
@@ -292,10 +347,10 @@ class TextManager {
             textItem.addEventListener('drop', (e) => {
                 e.preventDefault();
                 textItem.classList.remove('drag-over');
-                
+
                 const draggedIndex = parseInt(e.dataTransfer.getData('text/plain'));
                 const targetIndex = parseInt(textItem.dataset.index);
-                
+
                 if (draggedIndex !== targetIndex) {
                     this.reorderTexts(draggedIndex, targetIndex);
                 }
@@ -306,7 +361,7 @@ class TextManager {
                 if (e.target.classList.contains('action-btn')) {
                     const action = e.target.dataset.action;
                     const index = parseInt(e.target.dataset.index);
-                    
+
                     switch (action) {
                         case 'copy':
                             this.copyToClipboard(text);
@@ -331,7 +386,7 @@ class TextManager {
     updateEmptyState() {
         const emptyState = document.getElementById('emptyState');
         const textsContainer = document.getElementById('textsContainer');
-        
+
         if (this.texts.length === 0) {
             emptyState.style.display = 'block';
             textsContainer.style.display = 'none';

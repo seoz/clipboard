@@ -1,17 +1,19 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=500, initial-scale=1.0">
-    <title>Multi-Text Clipboard Manager</title>
+    <title>QuickPaste</title>
     <link rel="stylesheet" href="popup.css">
 </head>
+
 <body>
     <div class="container">
         <header class="header">
             <div class="header-left">
-                <img src="icons/icon32.png" alt="Clipboard Manager" class="header-icon">
-                <h1>Text Manager</h1>
+                <img src="icons/icon32.png" alt="QuickPaste" class="header-icon">
+                <h1>QuickPaste</h1>
             </div>
             <div class="header-actions">
                 <button id="importBtn" class="icon-btn" title="Import texts from file">
@@ -26,7 +28,7 @@
             </div>
             <input type="file" id="fileInput" accept=".json" style="display: none;">
         </header>
-        
+
         <div class="search-container">
             <input type="text" id="searchInput" placeholder="Search texts..." class="search-input">
             <div class="sort-control">
@@ -36,18 +38,18 @@
                 </select>
             </div>
         </div>
-        
+
         <div class="texts-container" id="textsContainer">
             <!-- Texts will be dynamically added here -->
         </div>
-        
+
         <div class="empty-state" id="emptyState">
             <div class="empty-icon">📝</div>
             <p>No texts saved yet</p>
             <p class="empty-subtitle">Click the + button to add your first text</p>
         </div>
     </div>
-    
+
     <!-- Add/Edit Modal -->
     <div class="modal" id="textModal">
         <div class="modal-content">
@@ -64,7 +66,8 @@
             </div>
         </div>
     </div>
-    
+
     <script src="popup.js"></script>
 </body>
+
 </html>

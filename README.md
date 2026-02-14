@@ -1,4 +1,4 @@
-# Multi-Text Clipboard Manager
+# QuickPaste
 
 A Chrome extension that allows you to store and manage multiple texts with easy clipboard access.
 

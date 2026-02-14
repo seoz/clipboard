@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Multi-Text Clipboard Manager",
+  "name": "QuickPaste",
   "version": "1.0",
   "description": "Store and manage multiple texts with easy clipboard access",
   "permissions": [
@@ -9,7 +9,7 @@
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Multi-Text Clipboard Manager"
+    "default_title": "QuickPaste"
   },
   "icons": {
     "16": "icons/icon16.png",

@@ -10,6 +10,7 @@ A Chrome extension that allows you to store and manage multiple texts with easy 
 - ✅ Copy selected text to system clipboard
 - ✅ Search functionality
 - ✅ Modern, responsive UI
+- ✅ Flexible sorting: Manual or Frequency-based
 - ✅ Works across browser restarts and system reboots
 
 ## Installation
@@ -19,29 +20,6 @@ A Chrome extension that allows you to store and manage multiple texts with easy 
 3. Enable "Developer mode" in the top right
 4. Click "Load unpacked" and select the extension folder
 5. The extension icon should appear in your Chrome toolbar
-
-## Creating Icons
-
-The extension requires PNG icons in the following sizes:
-- 16x16 pixels
-- 32x32 pixels  
-- 48x48 pixels
-- 128x128 pixels
-
-To create the icons:
-
-1. Use the provided `icon.svg` as a base
-2. Convert it to PNG format in the required sizes
-3. Save them in the `icons/` folder as:
-   - `icon16.png`
-   - `icon32.png`
-   - `icon48.png`
-   - `icon128.png`
-
-You can use online SVG to PNG converters or tools like:
-- [Convertio](https://convertio.co/svg-png/)
-- [CloudConvert](https://cloudconvert.com/svg-to-png)
-- [SVG to PNG Converter](https://svgtopng.com/)
 
 ## Usage
 

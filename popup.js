@@ -493,7 +493,12 @@ class TextManager {
             textItem.innerHTML = `
                 <div class="drag-handle" title="Drag to reorder" style="${dragHandleStyle}">⋮⋮</div>
                 <div class="text-content-wrapper">
-                    <div class="text-content">${this.escapeHtml(text)}</div>
+                    <div class="text-body-row">
+                        <div class="text-content">${this.escapeHtml(text)}</div>
+                        <div class="frequency-badge" title="Usage count">
+                            ${item.frequency || 0}
+                        </div>
+                    </div>
                     <div class="text-actions">
                         <button class="action-btn copy-btn" data-action="copy" data-index="${index}">
                             📋 Copy

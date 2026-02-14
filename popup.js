@@ -4,15 +4,20 @@ class TextManager {
         this.selectedIndex = -1;
         this.editingIndex = -1;
         this.maxTexts = 20;
+        this.sortMode = 'manual'; // 'manual' or 'frequency'
         this.init();
     }
 
     async init() {
+        await this.loadSettings();
         await this.loadTexts();
         this.setupEventListeners();
         this.setupKeyboardNavigation();
         this.renderTexts();
         this.updateEmptyState();
+
+        // precise initial UI state
+        document.getElementById('sortSelect').value = this.sortMode;
     }
 
     async exportTexts() {
@@ -42,21 +47,42 @@ class TextManager {
             try {
                 const importedTexts = JSON.parse(e.target.result);
                 if (!Array.isArray(importedTexts)) {
-                    throw new Error('Invalid format: file must contain an array of strings');
+                    throw new Error('Invalid format: file must contain an array of strings or objects');
                 }
 
                 // Append new texts
                 let addedCount = 0;
-                for (const text of importedTexts) {
-                    if (typeof text === 'string' && text.trim().length > 0) {
+                for (const item of importedTexts) {
+                    let textContent = '';
+                    let itemFrequency = 0;
+                    let itemTimestamp = Date.now();
+
+                    if (typeof item === 'string') {
+                        textContent = item.trim();
+                    } else if (typeof item === 'object' && item.text) {
+                        textContent = item.text.trim();
+                        itemFrequency = item.frequency || 0;
+                        itemTimestamp = item.timestamp || Date.now();
+                    }
+
+                    if (textContent.length > 0) {
                         if (this.texts.length < this.maxTexts) {
-                            this.texts.push(text.trim());
+                            this.texts.push({
+                                text: textContent,
+                                frequency: itemFrequency,
+                                timestamp: itemTimestamp
+                            });
                             addedCount++;
                         }
                     }
                 }
 
                 await this.saveTexts();
+
+                if (this.sortMode === 'frequency') {
+                    this.sortTexts();
+                }
+
                 this.renderTexts();
                 this.updateEmptyState();
 
@@ -97,6 +123,14 @@ class TextManager {
 
         document.getElementById('fileInput').addEventListener('change', (e) => {
             this.importTexts(e);
+        });
+
+        // Sort functionality
+        document.getElementById('sortSelect').addEventListener('change', (e) => {
+            this.sortMode = e.target.value;
+            this.sortTexts();
+            this.saveTexts(); // Save sort preference
+            this.renderTexts();
         });
 
         // Search functionality
@@ -162,7 +196,9 @@ class TextManager {
                 if (this.selectedIndex >= 0 && this.selectedIndex < visibleItems.length) {
                     const selectedItem = visibleItems[this.selectedIndex];
                     const index = parseInt(selectedItem.dataset.index);
-                    this.copyToClipboard(this.texts[index]);
+                    const item = this.texts[index];
+                    const text = typeof item === 'object' ? item.text : item;
+                    this.copyToClipboard(text);
                 }
             }
         });
@@ -182,10 +218,41 @@ class TextManager {
         }
     }
 
+    async loadSettings() {
+        try {
+            const result = await chrome.storage.local.get(['sortMode']);
+            this.sortMode = result.sortMode || 'manual';
+        } catch (error) {
+            console.error('Error loading settings:', error);
+        }
+    }
+
     async loadTexts() {
         try {
             const result = await chrome.storage.local.get(['savedTexts']);
-            this.texts = result.savedTexts || [];
+            const rawTexts = result.savedTexts || [];
+
+            // Migration: Convert strings to objects if needed
+            this.texts = rawTexts.map(item => {
+                if (typeof item === 'string') {
+                    return {
+                        text: item,
+                        frequency: 0,
+                        timestamp: Date.now()
+                    };
+                }
+                // Ensure existing objects have all properties
+                return {
+                    text: item.text,
+                    frequency: item.frequency || 0,
+                    timestamp: item.timestamp || Date.now()
+                };
+            });
+
+            // Initial sort if migrating or loading
+            if (this.sortMode === 'frequency') {
+                this.sortTexts();
+            }
         } catch (error) {
             console.error('Error loading texts:', error);
             this.texts = [];
@@ -194,7 +261,10 @@ class TextManager {
 
     async saveTexts() {
         try {
-            await chrome.storage.local.set({ savedTexts: this.texts });
+            await chrome.storage.local.set({
+                savedTexts: this.texts,
+                sortMode: this.sortMode
+            });
         } catch (error) {
             console.error('Error saving texts:', error);
         }
@@ -208,7 +278,7 @@ class TextManager {
 
         if (editIndex >= 0) {
             modalTitle.textContent = 'Edit Text';
-            textInput.value = this.texts[editIndex];
+            textInput.value = this.texts[editIndex].text;
         } else {
             modalTitle.textContent = 'Add New Text';
             textInput.value = '';
@@ -226,23 +296,27 @@ class TextManager {
 
     async saveText() {
         const textInput = document.getElementById('textInput');
-        const text = textInput.value.trim();
+        const textContent = textInput.value.trim();
 
-        if (!text) {
+        if (!textContent) {
             alert('Please enter some text');
             return;
         }
 
         if (this.editingIndex >= 0) {
-            // Editing existing text
-            this.texts[this.editingIndex] = text;
+            // Editing existing text - update text only, keep stats
+            this.texts[this.editingIndex].text = textContent;
         } else {
             // Adding new text
             if (this.texts.length >= this.maxTexts) {
                 alert(`Maximum ${this.maxTexts} texts allowed. Please delete some texts first.`);
                 return;
             }
-            this.texts.push(text);
+            this.texts.push({
+                text: textContent,
+                frequency: 0,
+                timestamp: Date.now()
+            });
         }
 
         await this.saveTexts();
@@ -261,6 +335,8 @@ class TextManager {
     }
 
     async reorderTexts(fromIndex, toIndex) {
+        if (this.sortMode === 'frequency') return; // Disable reordering in frequency mode
+
         // Remove the item from its current position
         const [movedItem] = this.texts.splice(fromIndex, 1);
         // Insert it at the new position
@@ -270,17 +346,43 @@ class TextManager {
         await this.saveTexts();
         // Re-render to update the UI
         this.renderTexts();
-        this.selectedIndex = -1; // Reset selection after reorder
+        this.selectedIndex = -1;
+    }
+
+    sortTexts() {
+        if (this.sortMode === 'frequency') {
+            this.texts.sort((a, b) => {
+                if (b.frequency !== a.frequency) {
+                    return b.frequency - a.frequency;
+                }
+                return b.timestamp - a.timestamp;
+            });
+        }
+        // For manual mode, we rely on the array order which is preserved
     }
 
     async copyToClipboard(text) {
         try {
             await navigator.clipboard.writeText(text);
+
+            // Increment frequency
+            const itemIndex = this.texts.findIndex(t => t.text === text);
+            if (itemIndex >= 0) {
+                this.texts[itemIndex].frequency++;
+
+                // If in frequency mode, resort and re-render
+                if (this.sortMode === 'frequency') {
+                    this.sortTexts();
+                    this.renderTexts();
+                }
+
+                await this.saveTexts();
+            }
+
             this.showCopyNotification();
-            setTimeout(() => window.close(), 100); // Close after a short delay to show notification
+            setTimeout(() => window.close(), 100);
         } catch (error) {
             console.error('Error copying to clipboard:', error);
-            // Fallback for older browsers
             this.fallbackCopyToClipboard(text);
         }
     }
@@ -376,13 +478,20 @@ class TextManager {
         const container = document.getElementById('textsContainer');
         container.innerHTML = '';
 
-        this.texts.forEach((text, index) => {
+        this.texts.forEach((item, index) => {
+            // Handle both string (legacy) and object formats safely
+            const text = typeof item === 'object' ? item.text : item;
+
             const textItem = document.createElement('div');
             textItem.className = 'text-item';
-            textItem.draggable = true;
+            // Disable drag in frequency mode
+            textItem.draggable = this.sortMode === 'manual';
             textItem.dataset.index = index;
+
+            const dragHandleStyle = this.sortMode === 'frequency' ? 'visibility: hidden; pointer-events: none;' : '';
+
             textItem.innerHTML = `
-                <div class="drag-handle" title="Drag to reorder">⋮⋮</div>
+                <div class="drag-handle" title="Drag to reorder" style="${dragHandleStyle}">⋮⋮</div>
                 <div class="text-content-wrapper">
                     <div class="text-content">${this.escapeHtml(text)}</div>
                     <div class="text-actions">
@@ -399,40 +508,42 @@ class TextManager {
                 </div>
             `;
 
-            // Add drag and drop handlers
-            textItem.addEventListener('dragstart', (e) => {
-                e.dataTransfer.setData('text/plain', index);
-                textItem.classList.add('dragging');
-            });
-
-            textItem.addEventListener('dragend', (e) => {
-                textItem.classList.remove('dragging');
-                // Remove all drag-over classes
-                document.querySelectorAll('.text-item').forEach(item => {
-                    item.classList.remove('drag-over');
+            // Add drag and drop handlers only if in manual mode
+            if (this.sortMode === 'manual') {
+                textItem.addEventListener('dragstart', (e) => {
+                    e.dataTransfer.setData('text/plain', index);
+                    textItem.classList.add('dragging');
                 });
-            });
 
-            textItem.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                textItem.classList.add('drag-over');
-            });
+                textItem.addEventListener('dragend', (e) => {
+                    textItem.classList.remove('dragging');
+                    // Remove all drag-over classes
+                    document.querySelectorAll('.text-item').forEach(item => {
+                        item.classList.remove('drag-over');
+                    });
+                });
 
-            textItem.addEventListener('dragleave', (e) => {
-                textItem.classList.remove('drag-over');
-            });
+                textItem.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    textItem.classList.add('drag-over');
+                });
 
-            textItem.addEventListener('drop', (e) => {
-                e.preventDefault();
-                textItem.classList.remove('drag-over');
+                textItem.addEventListener('dragleave', (e) => {
+                    textItem.classList.remove('drag-over');
+                });
 
-                const draggedIndex = parseInt(e.dataTransfer.getData('text/plain'));
-                const targetIndex = parseInt(textItem.dataset.index);
+                textItem.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    textItem.classList.remove('drag-over');
 
-                if (draggedIndex !== targetIndex) {
-                    this.reorderTexts(draggedIndex, targetIndex);
-                }
-            });
+                    const draggedIndex = parseInt(e.dataTransfer.getData('text/plain'));
+                    const targetIndex = parseInt(textItem.dataset.index);
+
+                    if (draggedIndex !== targetIndex) {
+                        this.reorderTexts(draggedIndex, targetIndex);
+                    }
+                });
+            }
 
             // Add click handlers
             textItem.addEventListener('click', (e) => {

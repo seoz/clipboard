@@ -16,6 +16,8 @@
 import { currentUser } from '../lib/auth.js';
 import { isConfigured } from '../lib/firebase.js';
 import { purgeIfSessionScoped } from '../lib/keycache.js';
+import { push, SyncOutcome } from '../lib/sync.js';
+import { getPending } from '../lib/queue.js';
 import { MSG } from '../shared/messages.js';
 
 const SYNC_ALARM = 'sync-flush';
@@ -28,18 +30,41 @@ async function scheduleFlush() {
 }
 
 /**
- * Phase 1: report who we are after a cold start. Phase 3 replaces the body
- * with the encrypt-and-push flush.
+ * Encrypt and upload everything the popup has queued.
+ *
+ * Runs on a cold worker: auth is restored from IndexedDB and the encryption
+ * key is read from the shared key cache, neither of which needs a page.
  */
 async function flush() {
     if (!isConfigured()) return { ok: false, reason: 'not-configured' };
 
-    const user = await currentUser();
-    if (!user) return { ok: false, reason: 'signed-out' };
+    let result;
+    try {
+        result = await push();
+    } catch (error) {
+        console.error('[quickpaste] flush threw:', error);
+        return { ok: false, reason: 'error', message: error.message };
+    }
 
-    // Proves the worker can refresh credentials without a page context.
-    const token = await user.getIdToken();
-    return { ok: true, uid: user.uid, email: user.email, tokenLength: token.length };
+    // A failure that is not fatal has already been given a backoff deadline;
+    // re-arm the alarm so the retry actually happens.
+    if (result.outcome === SyncOutcome.FAILED && !result.fatal) {
+        await chrome.alarms.create(SYNC_ALARM, { delayInMinutes: result.retryInMinutes });
+    }
+
+    await updateBadge();
+    return { ok: result.outcome === SyncOutcome.PUSHED || result.outcome === SyncOutcome.NOTHING_TO_DO,
+             ...result, error: result.error?.message };
+}
+
+/**
+ * A small count on the toolbar icon when work is outstanding. Deliberately
+ * quiet: no badge at all when everything is pushed.
+ */
+async function updateBadge() {
+    const pending = await getPending();
+    await chrome.action.setBadgeText({ text: pending.length ? String(pending.length) : '' });
+    await chrome.action.setBadgeBackgroundColor({ color: '#6c5ce7' });
 }
 
 // Honours the "until Chrome restarts" auto-lock policy. onStartup fires once
@@ -50,7 +75,8 @@ chrome.runtime.onStartup.addListener(() => {
 
 chrome.alarms.onAlarm.addListener(async alarm => {
     if (alarm.name !== SYNC_ALARM) return;
-    console.log('[quickpaste] flush:', await flush());
+    const result = await flush();
+    if (!result.ok) console.warn('[quickpaste] flush:', result);
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -58,6 +84,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         scheduleFlush();
         sendResponse({ scheduled: true });
         return false;
+    }
+
+    if (message?.type === MSG.SYNC_STATUS) {
+        getPending()
+            .then(pending => sendResponse({ pending: pending.length }))
+            .catch(() => sendResponse({ pending: 0 }));
+        return true;
     }
 
     if (message?.type === MSG.AUTH_STATUS) {

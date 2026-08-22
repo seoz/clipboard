@@ -7,6 +7,7 @@
  */
 
 import { migrateToV2, normalizeEntry, SCHEMA_VERSION } from './model.js';
+import { markDirty } from './queue.js';
 
 const KEYS = ['savedTexts', 'sortMode', 'schemaVersion'];
 
@@ -37,13 +38,22 @@ export async function loadState() {
     return { texts, sortMode };
 }
 
-export async function saveState({ texts, sortMode }) {
+/**
+ * Persist state, and record which entries changed so they can be pushed later.
+ *
+ * `dirtyIds` is deliberately a caller-supplied argument rather than something
+ * inferred by diffing: the caller always knows exactly what it touched, and
+ * diffing the whole array on every copy would cost more than the write itself.
+ * Nothing here awaits the network — see queue.js.
+ */
+export async function saveState({ texts, sortMode, dirtyIds = [] }) {
     try {
         await chrome.storage.local.set({
             savedTexts: texts,
             sortMode,
             schemaVersion: SCHEMA_VERSION
         });
+        if (dirtyIds.length) await markDirty(dirtyIds);
     } catch (error) {
         console.error('Error saving state:', error);
     }

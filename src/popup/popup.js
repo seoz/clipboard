@@ -1,4 +1,5 @@
 import { loadState, saveState } from '../lib/store.js';
+import { MSG } from '../shared/messages.js';
 import {
     newEntry, normalizeEntry, migrateToV2, isLive, touch,
     orderBetween, renumber, SCHEMA_VERSION
@@ -41,10 +42,49 @@ class TextManager {
         this.renderTexts();
 
         document.getElementById('sortSelect').value = this.sortMode;
+
+        // Non-blocking: the list must render whether or not sync is reachable.
+        this.refreshSyncStatus();
     }
 
-    async save() {
-        await saveState({ texts: this.texts, sortMode: this.sortMode });
+    /**
+     * Persist locally and, if anything actually changed, ask the worker to
+     * upload it. The request is fire-and-forget: this must not delay the UI,
+     * and the popup is often about to close itself.
+     */
+    async save(dirtyIds = []) {
+        await saveState({ texts: this.texts, sortMode: this.sortMode, dirtyIds });
+        if (dirtyIds.length) this.requestSync();
+    }
+
+    /**
+     * Reflect sync state in the header. Stays hidden entirely when signed out,
+     * so a local-only user never sees sync affordances they didn't ask for.
+     */
+    async refreshSyncStatus() {
+        const button = document.getElementById('syncBtn');
+        try {
+            const auth = await chrome.runtime.sendMessage({ type: MSG.AUTH_STATUS });
+            if (!auth?.signedIn) return;
+
+            this.syncEnabled = true;
+            button.hidden = false;
+
+            const { pending = 0 } = await chrome.runtime.sendMessage({ type: MSG.SYNC_STATUS }) ?? {};
+            button.dataset.state = pending > 0 ? 'pending' : 'synced';
+            button.title = pending > 0
+                ? `${pending} change${pending === 1 ? '' : 's'} waiting to sync`
+                : 'Everything is synced';
+        } catch {
+            // No worker, or it's still waking. Local editing is unaffected.
+            button.hidden = true;
+        }
+    }
+
+    requestSync() {
+        // No await, and errors are swallowed: a missing worker must never
+        // break a local edit.
+        chrome.runtime.sendMessage({ type: MSG.SYNC_REQUEST }).catch(() => {});
     }
 
     // ---- derived views ------------------------------------------------
@@ -119,6 +159,7 @@ class TextManager {
             const existingIds = new Set(this.texts.map(entry => entry.id));
             const maxOrder = this.texts.reduce((max, e) => Math.max(max, e.order), 0);
 
+            const imported = [];
             let added = 0;
             let skipped = 0;
             let truncated = false;
@@ -129,10 +170,11 @@ class TextManager {
                 entry.order = maxOrder + (i + 1) * 1000;
                 this.texts.push(entry);
                 existingIds.add(entry.id);
+                imported.push(entry.id);
                 added++;
             });
 
-            await this.save();
+            await this.save(imported);
             this.renderTexts();
 
             if (truncated) {
@@ -157,6 +199,7 @@ class TextManager {
 
     setupEventListeners() {
         document.getElementById('addTextBtn').addEventListener('click', () => this.openModal());
+        document.getElementById('syncBtn').addEventListener('click', () => chrome.runtime.openOptionsPage());
         document.getElementById('exportBtn').addEventListener('click', () => this.exportTexts());
         document.getElementById('importBtn').addEventListener('click', () => {
             document.getElementById('fileInput').click();
@@ -166,7 +209,7 @@ class TextManager {
         document.getElementById('sortSelect').addEventListener('change', async e => {
             this.sortMode = e.target.value === 'frequency' ? 'frequency' : 'manual';
             this.selectedIndex = -1;
-            await this.save();
+            await this.save();   // a local view preference; nothing to upload
             this.renderTexts();
         });
 
@@ -336,9 +379,11 @@ class TextManager {
         }
 
         const editing = this.editingId ? this.byId(this.editingId) : null;
+        let dirty;
 
         if (editing) {
             touch(editing, { text: textContent });
+            dirty = editing.id;
         } else {
             if (this.texts.filter(isLive).length >= this.maxTexts) {
                 this.showToast(
@@ -346,10 +391,12 @@ class TextManager {
                 return;
             }
             const maxOrder = this.texts.reduce((max, e) => Math.max(max, e.order), 0);
-            this.texts.push(newEntry(textContent, { order: maxOrder + 1000 }));
+            const created = newEntry(textContent, { order: maxOrder + 1000 });
+            this.texts.push(created);
+            dirty = created.id;
         }
 
-        await this.save();
+        await this.save([dirty]);
         this.renderTexts();
         this.closeModal();
     }
@@ -364,7 +411,7 @@ class TextManager {
 
         touch(entry, { deletedAt: Date.now() });
         this.selectedIndex = -1;
-        await this.save();
+        await this.save([entry.id]);
         this.renderTexts();
     }
 
@@ -392,16 +439,20 @@ class TextManager {
         const after = sequence[to + 1]?.order ?? null;
         const order = orderBetween(before, after);
 
+        let dirty;
         if (order === null) {
-            // Gap exhausted (only after very many inserts in one spot).
+            // Gap exhausted (only after very many inserts in one spot). Every
+            // entry moves, so every entry has to be pushed.
             renumber(sequence);
             sequence.forEach(entry => { entry.updatedAt = Date.now(); });
+            dirty = sequence.map(entry => entry.id);
         } else {
             touch(dragged, { order });
+            dirty = [dragged.id];
         }
 
         this.selectedIndex = -1;
-        await this.save();
+        await this.save(dirty);
         this.renderTexts();
     }
 
@@ -427,8 +478,9 @@ class TextManager {
         // sort reads, and the one sync will key its pushes off.
         touch(entry, { frequency: entry.frequency + 1 });
 
-        // Persist before the popup tears itself down below.
-        await this.save();
+        // Persist before the popup tears itself down below. The upload is the
+        // worker's problem, which is what makes this safe despite the close.
+        await this.save([entry.id]);
 
         this.showToast('Copied to clipboard!');
         setTimeout(() => window.close(), 100);

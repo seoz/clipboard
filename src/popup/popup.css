@@ -563,3 +563,30 @@ body {
 .show-more-btn:hover {
     background-color: #f2f4f6;
 }
+
+/* ---- sync indicator ---- */
+.icon-btn {
+    position: relative;
+}
+
+.sync-dot {
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: transparent;
+}
+
+#syncBtn[data-state="pending"] .sync-dot {
+    background: #4a9eff;
+}
+
+#syncBtn[data-state="error"] .sync-dot {
+    background: #e53935;
+}
+
+#syncBtn[data-state="locked"] .sync-dot {
+    background: #f0a500;
+}

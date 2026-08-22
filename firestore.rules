@@ -1,0 +1,110 @@
+rules_version = '2';
+
+// The only server-side enforcement in the system.
+//
+// These rules CANNOT validate the ciphertext itself — that is the point of
+// end-to-end encryption; the server has no key. What they do enforce is
+// ownership, exact field sets, size ceilings, and the invariants the sync
+// merge depends on (monotonic clocks, one-way tombstones).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    // Ciphertext and salts arrive as base64. Rejecting anything else stops the
+    // store being used as a dumping ground for arbitrary blobs.
+    function isB64(s, maxLen) {
+      return s is string
+             && s.size() > 0
+             && s.size() <= maxLen
+             && s.matches('^[A-Za-z0-9+/]+={0,2}$');
+    }
+
+    function validKdf(k) {
+      return k.keys().hasOnly(['alg', 'iterations', 'salt'])
+        && k.alg == 'PBKDF2-SHA256'
+        && k.iterations is int
+        // Floor stops a client weakening its own KDF; ceiling stops a
+        // denial-of-service against whoever next unlocks on another device.
+        && k.iterations >= 100000
+        && k.iterations <= 5000000
+        && isB64(k.salt, 64);
+    }
+
+    function validVerifier(v) {
+      return v.keys().hasOnly(['iv', 'ct'])
+        && isB64(v.iv, 32)
+        && isB64(v.ct, 256);
+    }
+
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+
+      allow create: if isOwner(uid)
+        && request.resource.data.keys().hasOnly(
+             ['schemaVersion', 'kdf', 'verifier', 'createdAt', 'updatedAt'])
+        && request.resource.data.schemaVersion is int
+        && request.resource.data.schemaVersion == 2
+        && validKdf(request.resource.data.kdf)
+        && validVerifier(request.resource.data.verifier)
+        && request.resource.data.createdAt is int
+        && request.resource.data.updatedAt is int;
+
+      // A passphrase change rotates salt and verifier, but must not rewrite
+      // history: createdAt is pinned and updatedAt must move forward, so an
+      // old verifier can't be replayed over a newer one.
+      allow update: if isOwner(uid)
+        && request.resource.data.keys().hasOnly(
+             ['schemaVersion', 'kdf', 'verifier', 'createdAt', 'updatedAt'])
+        && request.resource.data.schemaVersion == 2
+        && validKdf(request.resource.data.kdf)
+        && validVerifier(request.resource.data.verifier)
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt > resource.data.updatedAt;
+
+      allow delete: if isOwner(uid);
+
+      match /entries/{entryId} {
+
+        function validEntry(d) {
+          return d.keys().hasOnly(
+                   ['v', 'ct', 'iv', 'order', 'createdAt', 'updatedAt', 'deletedAt'])
+            && d.v is int && d.v == 1
+            && isB64(d.ct, 200000)     // ~150KB of plaintext per snippet
+            && isB64(d.iv, 32)
+            && d.order is number
+            && d.createdAt is int && d.createdAt > 0
+            && d.updatedAt is int && d.updatedAt > 0
+            && (d.deletedAt == null || (d.deletedAt is int && d.deletedAt > 0));
+        }
+
+        allow read: if isOwner(uid);
+
+        allow create: if isOwner(uid)
+          && entryId.size() >= 8 && entryId.size() <= 64
+          && validEntry(request.resource.data);
+
+        allow update: if isOwner(uid)
+          && validEntry(request.resource.data)
+          && request.resource.data.createdAt == resource.data.createdAt
+          // >= not > so an idempotent re-push of an unchanged record still
+          // succeeds, while a rewound clock is refused.
+          && request.resource.data.updatedAt >= resource.data.updatedAt
+          // Tombstones are one-way: a stale device cannot un-delete.
+          && (resource.data.deletedAt == null
+              || request.resource.data.deletedAt != null);
+
+        // Hard delete is permitted only as garbage collection of a tombstone,
+        // which forces every deletion through the soft-delete path the merge
+        // algorithm relies on.
+        allow delete: if isOwner(uid) && resource.data.deletedAt != null;
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -40,14 +40,78 @@
                     <span class="account-label">Signed in as</span>
                     <span class="account-email" id="accountEmail"></span>
                 </div>
-                <p class="muted" id="syncNotice">
-                    Sync isn't switched on yet — setting an encryption passphrase
-                    comes next. Nothing has been uploaded.
-                </p>
                 <button id="signOutBtn" class="secondary-btn">Sign out</button>
             </div>
 
             <p class="status" id="status" role="status" aria-live="polite"></p>
+        </section>
+
+        <section class="card" id="encryptionCard" hidden>
+            <h2>Encryption</h2>
+
+            <!-- First-time setup -->
+            <div id="passphraseSetup" hidden>
+                <p class="muted">
+                    Choose a passphrase. Your snippets are encrypted with it on this
+                    device before anything is uploaded, so the server only ever stores
+                    unreadable data.
+                </p>
+
+                <div class="warning">
+                    <strong>There is no way to recover this passphrase.</strong>
+                    Not by you, and not by us — that's what makes the encryption
+                    meaningful. If you forget it, your synced snippets are gone for good.
+                    Write it down somewhere safe.
+                </div>
+
+                <label class="field">
+                    <span>Passphrase</span>
+                    <input type="password" id="newPassphrase" autocomplete="new-password">
+                </label>
+                <label class="field">
+                    <span>Confirm passphrase</span>
+                    <input type="password" id="confirmPassphrase" autocomplete="new-password">
+                </label>
+                <label class="checkbox">
+                    <input type="checkbox" id="ackLoss">
+                    <span>I understand my snippets can't be recovered if I forget this.</span>
+                </label>
+
+                <button id="enableEncryptionBtn" class="primary-btn" disabled>
+                    Set passphrase
+                </button>
+            </div>
+
+            <!-- Returning, but locked -->
+            <div id="passphraseUnlock" hidden>
+                <p class="muted">
+                    Enter your passphrase to unlock encrypted syncing on this device.
+                </p>
+                <label class="field">
+                    <span>Passphrase</span>
+                    <input type="password" id="unlockPassphrase" autocomplete="current-password">
+                </label>
+                <button id="unlockBtn" class="primary-btn">Unlock</button>
+            </div>
+
+            <!-- Unlocked -->
+            <div id="passphraseUnlocked" hidden>
+                <p class="unlocked-state">🔓 Unlocked on this device.</p>
+
+                <label class="field">
+                    <span>Stay unlocked for</span>
+                    <select id="lockPolicy">
+                        <option value="week">7 days</option>
+                        <option value="session">Until Chrome restarts</option>
+                        <option value="always">Ask every time</option>
+                    </select>
+                </label>
+                <p class="muted" id="lockPolicyHint"></p>
+
+                <button id="lockNowBtn" class="secondary-btn">Lock now</button>
+            </div>
+
+            <p class="status" id="cryptoStatus" role="status" aria-live="polite"></p>
         </section>
 
         <section class="card" id="diagnosticsCard" hidden>

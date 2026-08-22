@@ -15,6 +15,7 @@
 
 import { currentUser } from '../lib/auth.js';
 import { isConfigured } from '../lib/firebase.js';
+import { purgeIfSessionScoped } from '../lib/keycache.js';
 import { MSG } from '../shared/messages.js';
 
 const SYNC_ALARM = 'sync-flush';
@@ -40,6 +41,12 @@ async function flush() {
     const token = await user.getIdToken();
     return { ok: true, uid: user.uid, email: user.email, tokenLength: token.length };
 }
+
+// Honours the "until Chrome restarts" auto-lock policy. onStartup fires once
+// per browser launch, which is the only signal an extension gets for it.
+chrome.runtime.onStartup.addListener(() => {
+    purgeIfSessionScoped().catch(error => console.error('Session purge failed:', error));
+});
 
 chrome.alarms.onAlarm.addListener(async alarm => {
     if (alarm.name !== SYNC_ALARM) return;

@@ -19,6 +19,7 @@ import {
     GoogleAuthProvider, signInWithCredential, signOut, onAuthStateChanged
 } from 'firebase/auth/web-extension';
 import { getFirebaseAuth } from './firebase.js';
+import { lockNow } from './keycache.js';
 
 /** Promisified chrome.identity.getAuthToken. */
 function getAuthToken(interactive) {
@@ -74,6 +75,10 @@ export async function signOutEverywhere() {
             console.warn('Token revocation failed (continuing):', error);
         }
     }
+    // Drop the cached encryption key too. getCachedKey() also refuses a key
+    // belonging to a different uid, but leaving one behind on sign-out would
+    // be an unnecessary window.
+    await lockNow();
     await signOut(getFirebaseAuth());
 }
 

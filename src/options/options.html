@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QuickPaste — Account &amp; Sync</title>
+    <link rel="stylesheet" href="options.css">
+</head>
+
+<body>
+    <main class="page">
+        <header class="page-header">
+            <img src="/icons/icon48.png" alt="" class="page-icon">
+            <div>
+                <h1>QuickPaste</h1>
+                <p class="page-subtitle">Account &amp; sync</p>
+            </div>
+        </header>
+
+        <section class="card" id="setupCard" hidden>
+            <h2>Setup needed</h2>
+            <p class="muted" id="setupMessage"></p>
+        </section>
+
+        <section class="card" id="accountCard" hidden>
+            <h2>Account</h2>
+
+            <div id="signedOut">
+                <p class="muted">
+                    Sign in to sync your snippets across devices. Your snippets are
+                    encrypted on this device before they're uploaded, so nobody —
+                    including us — can read them on the server.
+                </p>
+                <button id="signInBtn" class="primary-btn">Sign in with Google</button>
+            </div>
+
+            <div id="signedIn" hidden>
+                <div class="account-row">
+                    <span class="account-label">Signed in as</span>
+                    <span class="account-email" id="accountEmail"></span>
+                </div>
+                <p class="muted" id="syncNotice">
+                    Sync isn't switched on yet — setting an encryption passphrase
+                    comes next. Nothing has been uploaded.
+                </p>
+                <button id="signOutBtn" class="secondary-btn">Sign out</button>
+            </div>
+
+            <p class="status" id="status" role="status" aria-live="polite"></p>
+        </section>
+
+        <section class="card" id="diagnosticsCard" hidden>
+            <h2>Diagnostics</h2>
+            <p class="muted">
+                Checks that the background worker can restore your session and mint a
+                fresh token on its own — which is what lets sync run while the popup
+                is closed.
+            </p>
+            <button id="workerCheckBtn" class="secondary-btn">Check background worker</button>
+            <pre class="diagnostics-output" id="workerOutput" hidden></pre>
+        </section>
+    </main>
+
+    <script type="module" src="options.js"></script>
+</body>
+
+</html>

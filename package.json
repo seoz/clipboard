@@ -6,9 +6,12 @@
   "description": "Store and manage multiple texts with easy clipboard access",
   "scripts": {
     "dev": "vite build --watch --mode development",
-    "build": "vite build"
+    "build": "vite build",
+    "test": "vitest run --config vitest.config.js",
+    "test:watch": "vitest --config vitest.config.js"
   },
   "devDependencies": {
-    "vite": "^7.1.5"
+    "vite": "^7.1.5",
+    "vitest": "^3.2.4"
   }
 }

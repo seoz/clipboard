@@ -95,6 +95,49 @@ when('firestore rules', () => {
         });
     });
 
+    // Over-denial is the failure mode that would break sync while looking like
+    // a network problem, so the permitted paths are asserted as carefully as
+    // the forbidden ones.
+    describe('permitted paths', () => {
+        it('lets a user read their own account and entries', async () => {
+            await seed(['users', ALICE], validAccount());
+            await seed(['users', ALICE, 'entries', 'entry-0001'], validEntry());
+            await assertSucceeds(getDoc(accountRef(asAlice())));
+            await assertSucceeds(getDoc(entryRef(asAlice())));
+        });
+
+        it('allows a normal edit that moves updatedAt forward', async () => {
+            await seed(['users', ALICE, 'entries', 'entry-0001'], validEntry({ updatedAt: 1000 }));
+            await assertSucceeds(setDoc(entryRef(asAlice()),
+                validEntry({ ct: b64(128), updatedAt: 2000 })));
+        });
+
+        it('allows tombstoning a live entry', async () => {
+            await seed(['users', ALICE, 'entries', 'entry-0001'], validEntry({ updatedAt: 1000 }));
+            await assertSucceeds(setDoc(entryRef(asAlice()),
+                validEntry({ deletedAt: 2000, updatedAt: 2000 })));
+        });
+
+        it('allows a reorder that changes only order', async () => {
+            await seed(['users', ALICE, 'entries', 'entry-0001'], validEntry({ updatedAt: 1000 }));
+            await assertSucceeds(setDoc(entryRef(asAlice()),
+                validEntry({ order: 1500.5, updatedAt: 2000 })));
+        });
+
+        it('accepts a uuid-shaped entry id, as the client actually generates', async () => {
+            await assertSucceeds(setDoc(
+                entryRef(asAlice(), '3f2504e0-4f89-11d3-9a0c-0305e82c3301'), validEntry()));
+        });
+
+        it('accepts ciphertext at the size ceiling', async () => {
+            await assertSucceeds(setDoc(entryRef(asAlice()), validEntry({ ct: b64(200_000) })));
+        });
+
+        it('accepts a negative order, which orderBetween can produce', async () => {
+            await assertSucceeds(setDoc(entryRef(asAlice()), validEntry({ order: -1000 })));
+        });
+    });
+
     describe('account shape', () => {
         it('refuses an unexpected field', async () => {
             await assertFails(setDoc(accountRef(asAlice()),

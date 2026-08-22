@@ -9,7 +9,7 @@
     "build": "vite build",
     "test": "vitest run --config vitest.config.js",
     "test:watch": "vitest --config vitest.config.js",
-    "emulators": "firebase emulators:start --only auth,firestore",
+    "emulators": "./scripts/with-java.sh firebase emulators:start --only auth,firestore",
     "rules:deploy": "firebase deploy --only firestore:rules"
   },
   "devDependencies": {

@@ -1,0 +1,14 @@
+{
+  "name": "quickpaste",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Store and manage multiple texts with easy clipboard access",
+  "scripts": {
+    "dev": "vite build --watch --mode development",
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "vite": "^7.1.5"
+  }
+}

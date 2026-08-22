@@ -45,7 +45,6 @@ A Chrome extension that allows you to store and manage multiple texts with easy 
 ├── popup.html            # Main popup interface
 ├── popup.css             # Styling
 ├── popup.js              # Main functionality
-├── icon.svg              # Source icon (SVG)
 ├── icons/                # PNG icons directory
 │   ├── icon16.png
 │   ├── icon32.png

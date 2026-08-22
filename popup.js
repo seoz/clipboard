@@ -59,21 +59,20 @@ class TextManager {
 
                     if (typeof item === 'string') {
                         textContent = item.trim();
-                    } else if (typeof item === 'object' && item.text) {
+                    } else if (item && typeof item === 'object' && typeof item.text === 'string') {
                         textContent = item.text.trim();
                         itemFrequency = item.frequency || 0;
                         itemTimestamp = item.timestamp || Date.now();
                     }
 
                     if (textContent.length > 0) {
-                        if (this.texts.length < this.maxTexts) {
-                            this.texts.push({
-                                text: textContent,
-                                frequency: itemFrequency,
-                                timestamp: itemTimestamp
-                            });
-                            addedCount++;
-                        }
+                        if (this.texts.length >= this.maxTexts) break;
+                        this.texts.push({
+                            text: textContent,
+                            frequency: itemFrequency,
+                            timestamp: itemTimestamp
+                        });
+                        addedCount++;
                     }
                 }
 
@@ -196,9 +195,7 @@ class TextManager {
                 if (this.selectedIndex >= 0 && this.selectedIndex < visibleItems.length) {
                     const selectedItem = visibleItems[this.selectedIndex];
                     const index = parseInt(selectedItem.dataset.index);
-                    const item = this.texts[index];
-                    const text = typeof item === 'object' ? item.text : item;
-                    this.copyToClipboard(text);
+                    this.copyToClipboard(index);
                 }
             }
         });
@@ -361,23 +358,23 @@ class TextManager {
         // For manual mode, we rely on the array order which is preserved
     }
 
-    async copyToClipboard(text) {
+    async copyToClipboard(index) {
+        const item = this.texts[index];
+        if (!item) return;
+        const text = item.text;
+
         try {
             await navigator.clipboard.writeText(text);
 
-            // Increment frequency
-            const itemIndex = this.texts.findIndex(t => t.text === text);
-            if (itemIndex >= 0) {
-                this.texts[itemIndex].frequency++;
+            item.frequency++;
 
-                // If in frequency mode, resort and re-render
-                if (this.sortMode === 'frequency') {
-                    this.sortTexts();
-                    this.renderTexts();
-                }
-
-                await this.saveTexts();
+            // If in frequency mode, resort and re-render
+            if (this.sortMode === 'frequency') {
+                this.sortTexts();
+                this.renderTexts();
             }
+
+            await this.saveTexts();
 
             this.showCopyNotification();
             setTimeout(() => window.close(), 100);
@@ -558,7 +555,7 @@ class TextManager {
 
                     switch (action) {
                         case 'copy':
-                            this.copyToClipboard(text);
+                            this.copyToClipboard(index);
                             break;
                         case 'edit':
                             this.openModal(index);
@@ -569,7 +566,7 @@ class TextManager {
                     }
                 } else if (!e.target.classList.contains('drag-handle')) {
                     // Click on text item itself - copy to clipboard (but not on drag handle)
-                    this.copyToClipboard(text);
+                    this.copyToClipboard(index);
                 }
             });
 

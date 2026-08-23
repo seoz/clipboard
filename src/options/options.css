@@ -187,3 +187,43 @@ button:disabled {
     font-weight: 600;
     margin: 0 0 16px;
 }
+
+.button-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+}
+
+.verify-headline {
+    font-weight: 600;
+    margin: 14px 0 10px;
+}
+
+.verify-headline[data-ok="true"] {
+    color: var(--ok);
+}
+
+.verify-headline[data-ok="false"] {
+    color: var(--danger);
+}
+
+.verify-table {
+    border-collapse: collapse;
+    width: 100%;
+    max-width: 420px;
+}
+
+.verify-table td {
+    padding: 4px 10px 4px 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.verify-table td:last-child {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.verify-problem {
+    color: var(--danger);
+}

@@ -8,9 +8,16 @@ let commitError = null;
 /** Commit index (0-based) that should throw, or null for "never". */
 let failCommitAt = null;
 
+/** Stand-in for what the server holds: id -> stored document. */
+const remote = new Map();
+
 vi.mock('firebase/firestore/lite', () => ({
     doc: (_ref, id) => ({ id }),
     collection: (_db, ...path) => ({ path: path.join('/') }),
+    getDocs: async () => ({
+        size: remote.size,
+        docs: [...remote.entries()].map(([id, data]) => ({ id, data: () => data }))
+    }),
     writeBatch: () => {
         const writes = [];
         return {
@@ -36,13 +43,21 @@ vi.mock('../src/lib/keycache.js', () => ({ getCachedKey: async () => key }));
 vi.mock('../src/lib/crypto.js', () => ({
     encryptJson: async (_k, value, aad) => ({
         iv: 'IV', ct: Buffer.from(JSON.stringify({ value, aad })).toString('base64')
-    })
+    }),
+    // Mirrors the real contract: decrypting under a mismatched AAD throws,
+    // which is what binds a ciphertext to its own entry id.
+    decryptJson: async (_k, record, aad) => {
+        const { value, aad: sealedAad } = JSON.parse(
+            Buffer.from(record.ct, 'base64').toString());
+        if (sealedAad !== aad) throw new Error('bad AAD');
+        return value;
+    }
 }));
 
 let texts = [];
 vi.mock('../src/lib/store.js', () => ({ loadState: async () => ({ texts, sortMode: 'manual' }) }));
 
-const { push, SyncOutcome } = await import('../src/lib/sync.js');
+const { push, verify, SyncOutcome } = await import('../src/lib/sync.js');
 const queue = await import('../src/lib/queue.js');
 
 const entry = (id, over = {}) => ({
@@ -60,6 +75,7 @@ function fakeStorage() {
 }
 
 beforeEach(() => {
+    remote.clear();
     commits.length = 0;
     commitError = null;
     failCommitAt = null;
@@ -200,5 +216,118 @@ describe('push failures', () => {
         // that didn't stays queued for the retry.
         expect(await queue.getPending()).toHaveLength(1);
         expect(await queue.inBackoff()).toBe(true);
+    });
+});
+
+
+describe('verify', () => {
+    // Seal a payload the way toRemote does, so verify() sees a realistic record.
+    const seal = (id, text, frequency = 0, over = {}) => {
+        remote.set(id, {
+            v: 1, iv: 'IV',
+            ct: Buffer.from(JSON.stringify({ value: { text, frequency }, aad: id })).toString('base64'),
+            order: 0, createdAt: 1000, updatedAt: 2000, deletedAt: null, ...over
+        });
+    };
+
+    it('reports in-sync when both sides agree', async () => {
+        texts = [entry('a'), entry('b')];
+        seal('a', 'text a');
+        seal('b', 'text b');
+
+        const report = await verify();
+        expect(report.fullyUploaded).toBe(true);
+        expect(report.awaitingPull).toBe(0);
+        expect(report.matched).toBe(2);
+        expect(report.localLive).toBe(2);
+        expect(report.remoteLive).toBe(2);
+        expect(report.notUploaded).toEqual([]);
+    });
+
+    it('flags an entry that never reached the server', async () => {
+        texts = [entry('a'), entry('b')];
+        seal('a', 'text a');
+
+        const report = await verify();
+        expect(report.fullyUploaded).toBe(false);
+        expect(report.notUploaded).toEqual([{ id: 'b', preview: 'text b' }]);
+    });
+
+    it('reports a server-only entry as awaiting pull, not as a fault', async () => {
+        // Another device pushed it. Pull isn't built yet, so this is expected
+        // and must not be reported as this device having failed to sync.
+        texts = [];
+        seal('ghost', 'from another device');
+
+        const report = await verify();
+        expect(report.fullyUploaded).toBe(true);
+        expect(report.awaitingPull).toBe(1);
+        expect(report.onlyOnServer).toEqual([{ id: 'ghost', preview: 'from another device' }]);
+    });
+
+    it('flags contents that disagree', async () => {
+        texts = [entry('a')];
+        seal('a', 'something else');
+
+        const report = await verify();
+        expect(report.fullyUploaded).toBe(false);
+        expect(report.matched).toBe(0);
+        expect(report.contentMismatch[0]).toMatchObject({
+            id: 'a', local: 'text a', remote: 'something else'
+        });
+    });
+
+    it('flags a deletion that only happened on one side', async () => {
+        texts = [entry('a', { deletedAt: 5000 })];
+        seal('a', 'text a');                       // server still thinks it is live
+
+        const report = await verify();
+        expect(report.fullyUploaded).toBe(false);
+        expect(report.contentMismatch[0]).toMatchObject({
+            localDeleted: true, remoteDeleted: false
+        });
+    });
+
+    it('counts a tombstone that agrees on both sides as matched', async () => {
+        texts = [entry('a', { deletedAt: 5000 })];
+        seal('a', 'text a', 0, { deletedAt: 5000 });
+
+        const report = await verify();
+        expect(report.fullyUploaded).toBe(true);
+        expect(report.matched).toBe(1);
+        expect(report.localLive).toBe(0);
+        expect(report.remoteTombstoned).toBe(1);
+    });
+
+    it('reports undecryptable records instead of treating them as missing', async () => {
+        texts = [entry('a')];
+        // Ciphertext sealed against a different entry id — the AAD check fails.
+        remote.set('a', {
+            v: 1, iv: 'IV',
+            ct: Buffer.from(JSON.stringify({ value: { text: 'x' }, aad: 'other-id' })).toString('base64'),
+            order: 0, createdAt: 1000, updatedAt: 2000, deletedAt: null
+        });
+
+        const report = await verify();
+        expect(report.fullyUploaded).toBe(false);
+        expect(report.undecryptable).toEqual(['a']);
+        expect(report.contentMismatch).toEqual([]);
+    });
+
+    it('refuses to guess while locked', async () => {
+        key = null;
+        expect((await verify()).outcome).toBe(SyncOutcome.LOCKED);
+    });
+
+    it('refuses while signed out', async () => {
+        user = null;
+        expect((await verify()).outcome).toBe(SyncOutcome.SIGNED_OUT);
+    });
+
+    it('truncates long previews so secrets are not dumped wholesale', async () => {
+        texts = [entry('a', { text: 'y'.repeat(200) })];
+        seal('a', 'z'.repeat(200));
+        const report = await verify();
+        expect(report.contentMismatch[0].local.length).toBeLessThanOrEqual(33);
     });
 });

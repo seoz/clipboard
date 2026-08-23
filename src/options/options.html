@@ -121,7 +121,17 @@
                 fresh token on its own — which is what lets sync run while the popup
                 is closed.
             </p>
-            <button id="workerCheckBtn" class="secondary-btn">Check background worker</button>
+            <div class="button-row">
+                <button id="workerCheckBtn" class="secondary-btn">Check background worker</button>
+                <button id="verifyBtn" class="secondary-btn">Verify sync</button>
+            </div>
+            <p class="muted" id="verifyHint">
+                <strong>Verify sync</strong> downloads everything the server holds,
+                decrypts it here, and compares it with what's on this device. The
+                Firestore console can't show you this — everything there is
+                encrypted.
+            </p>
+            <div id="verifySummary" hidden></div>
             <pre class="diagnostics-output" id="workerOutput" hidden></pre>
         </section>
     </main>

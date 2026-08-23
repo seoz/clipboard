@@ -7,11 +7,11 @@
  * happens on the client after decryption.
  */
 
-import { doc, collection, writeBatch } from 'firebase/firestore/lite';
+import { doc, collection, getDocs, writeBatch } from 'firebase/firestore/lite';
 import { getDb } from './firebase.js';
 import { currentUser } from './auth.js';
 import { getCachedKey } from './keycache.js';
-import { encryptJson } from './crypto.js';
+import { encryptJson, decryptJson } from './crypto.js';
 import { loadState } from './store.js';
 import { getPending, clearPending, recordFailure, clearBackoff, inBackoff } from './queue.js';
 
@@ -116,4 +116,112 @@ export async function push() {
     await clearBackoff();
 
     return { outcome: SyncOutcome.PUSHED, count: written.length };
+}
+
+
+/**
+ * Read every remote entry back, decrypt it, and compare against local state.
+ *
+ * Read-only: nothing is written, merged or repaired. Its job is to answer
+ * "is what the server holds actually my data?" — which the Firestore console
+ * cannot, because everything there is ciphertext.
+ *
+ * This is also a live test of the decrypt path, so a key or AAD mismatch shows
+ * up here as a decryption failure rather than as silent data loss later.
+ */
+export async function verify() {
+    const user = await currentUser();
+    if (!user) return { outcome: SyncOutcome.SIGNED_OUT };
+
+    const key = await getCachedKey(user.uid);
+    if (!key) return { outcome: SyncOutcome.LOCKED };
+
+    const snapshot = await getDocs(collection(getDb(), 'users', user.uid, 'entries'));
+    const { texts } = await loadState();
+    const localById = new Map(texts.map(entry => [entry.id, entry]));
+
+    const report = {
+        outcome: 'verified',
+        localLive: texts.filter(e => e.deletedAt == null).length,
+        localTombstoned: texts.filter(e => e.deletedAt != null).length,
+        remoteTotal: snapshot.size,
+        remoteLive: 0,
+        remoteTombstoned: 0,
+        matched: 0,
+        notUploaded: [],      // local entries with no remote counterpart
+        onlyOnServer: [],     // remote entries this device has never seen
+        contentMismatch: [],  // both sides exist but disagree
+        undecryptable: [],    // wrong key, wrong AAD, or corrupted ciphertext
+        pending: (await getPending()).length
+    };
+
+    const seen = new Set();
+
+    for (const docSnap of snapshot.docs) {
+        const remote = docSnap.data();
+        seen.add(docSnap.id);
+        if (remote.deletedAt == null) report.remoteLive++; else report.remoteTombstoned++;
+
+        let payload;
+        try {
+            payload = await decryptJson(key, remote, docSnap.id);
+        } catch {
+            report.undecryptable.push(docSnap.id);
+            continue;
+        }
+
+        const local = localById.get(docSnap.id);
+        if (!local) {
+            report.onlyOnServer.push({ id: docSnap.id, preview: preview(payload.text) });
+            continue;
+        }
+
+        const sameText = payload.text === local.text;
+        const sameDeleted = (remote.deletedAt ?? null) === (local.deletedAt ?? null);
+
+        if (sameText && sameDeleted) {
+            report.matched++;
+        } else {
+            report.contentMismatch.push({
+                id: docSnap.id,
+                local: preview(local.text),
+                remote: preview(payload.text),
+                localFrequency: local.frequency,
+                remoteFrequency: payload.frequency,
+                localDeleted: local.deletedAt != null,
+                remoteDeleted: remote.deletedAt != null
+            });
+        }
+    }
+
+    for (const entry of texts) {
+        if (!seen.has(entry.id)) {
+            report.notUploaded.push({ id: entry.id, preview: preview(entry.text) });
+        }
+    }
+
+    /*
+     * Two distinct questions, deliberately not conflated:
+     *
+     * fullyUploaded — is everything on this device faithfully on the server?
+     *   This is the only thing push-only sync can promise, and the only one
+     *   the user can act on today.
+     *
+     * awaitingPull  — does the server hold entries this device has never seen?
+     *   Expected, not a fault: another device pushed them and pull isn't built
+     *   yet. Reporting it as "out of sync" would be alarming and unactionable.
+     */
+    report.fullyUploaded = report.notUploaded.length === 0
+        && report.contentMismatch.length === 0
+        && report.undecryptable.length === 0;
+
+    report.awaitingPull = report.onlyOnServer.length;
+
+    return report;
+}
+
+/** Enough to recognise an entry, without dumping secrets into a log. */
+function preview(text) {
+    const oneLine = String(text).replace(/\s+/g, ' ').trim();
+    return oneLine.length > 32 ? oneLine.slice(0, 32) + '…' : oneLine;
 }

@@ -16,7 +16,7 @@
 import { currentUser } from '../lib/auth.js';
 import { isConfigured } from '../lib/firebase.js';
 import { purgeIfSessionScoped } from '../lib/keycache.js';
-import { push, SyncOutcome } from '../lib/sync.js';
+import { push, verify, SyncOutcome } from '../lib/sync.js';
 import { getPending } from '../lib/queue.js';
 import { MSG } from '../shared/messages.js';
 
@@ -99,6 +99,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             .then(user => sendResponse(
                 user ? { signedIn: true, uid: user.uid, email: user.email } : { signedIn: false }))
             .catch(error => sendResponse({ signedIn: false, error: error.message }));
+        return true;
+    }
+
+    if (message?.type === MSG.VERIFY_SYNC) {
+        verify()
+            .then(sendResponse)
+            .catch(error => sendResponse({ outcome: 'error', message: error.message }));
         return true;
     }
 

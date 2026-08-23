@@ -262,6 +262,102 @@ async function handleLockPolicyChange(event) {
     setCryptoStatus('Auto-lock updated.', 'ok');
 }
 
+/**
+ * Read the server back and compare. Rendered as a summary rather than raw JSON,
+ * because the useful answer is "yes, and here's the count" or "no, and here's
+ * exactly what disagrees".
+ */
+async function handleVerify() {
+    const button = el('verifyBtn');
+    const summary = el('verifySummary');
+    button.disabled = true;
+    summary.hidden = false;
+    summary.textContent = 'Downloading and decrypting…';
+
+    try {
+        const report = await chrome.runtime.sendMessage({ type: MSG.VERIFY_SYNC });
+        renderVerifyReport(report);
+    } catch (error) {
+        summary.textContent = `Could not verify: ${error.message}`;
+    } finally {
+        button.disabled = false;
+    }
+}
+
+function renderVerifyReport(report) {
+    const summary = el('verifySummary');
+    summary.replaceChildren();
+
+    if (report.outcome === 'signed-out') {
+        summary.textContent = 'Sign in first.';
+        return;
+    }
+    if (report.outcome === 'locked') {
+        summary.textContent =
+            'Locked on this device — the passphrase is needed to decrypt what the server holds.';
+        return;
+    }
+    if (report.outcome !== 'verified') {
+        summary.textContent = report.message ?? 'Verification failed.';
+        return;
+    }
+
+    const headline = document.createElement('p');
+    headline.className = 'verify-headline';
+    headline.dataset.ok = String(report.fullyUploaded);
+    headline.textContent = report.fullyUploaded
+        ? `✓ Everything on this device is on the server — ${report.matched} entries verified by decrypting them back.`
+        : '✗ Some entries are not safely on the server. Details below.';
+    summary.append(headline);
+
+    if (report.awaitingPull > 0) {
+        const note = document.createElement('p');
+        note.className = 'muted';
+        note.textContent =
+            `${report.awaitingPull} entr${report.awaitingPull === 1 ? 'y' : 'ies'} on the server ` +
+            "aren't on this device yet. That's expected — downloading them isn't built yet.";
+        summary.append(note);
+    }
+
+    const rows = [
+        ['Snippets on this device', report.localLive],
+        ['Live entries on the server', report.remoteLive],
+        ['Verified identical after decrypting', report.matched],
+        ['Deleted here (tombstoned)', report.localTombstoned],
+        ['Deleted on the server', report.remoteTombstoned],
+        ['Waiting to upload', report.pending]
+    ];
+
+    const problems = [
+        ['Not uploaded yet', report.notUploaded],
+
+        ['Contents disagree', report.contentMismatch],
+        ['Could not be decrypted', report.undecryptable]
+    ].filter(([, list]) => list.length > 0);
+
+    const table = document.createElement('table');
+    table.className = 'verify-table';
+    for (const [label, value] of rows) {
+        const tr = table.insertRow();
+        tr.insertCell().textContent = label;
+        tr.insertCell().textContent = String(value);
+    }
+    for (const [label, list] of problems) {
+        const tr = table.insertRow();
+        tr.className = 'verify-problem';
+        tr.insertCell().textContent = label;
+        tr.insertCell().textContent = String(list.length);
+    }
+    summary.append(table);
+
+    if (problems.length) {
+        const detail = document.createElement('pre');
+        detail.className = 'diagnostics-output';
+        detail.textContent = JSON.stringify(Object.fromEntries(problems), null, 2);
+        summary.append(detail);
+    }
+}
+
 async function main() {
     if (!isConfigured()) {
         el('setupCard').hidden = false;
@@ -276,6 +372,7 @@ async function main() {
     el('signInBtn').addEventListener('click', handleSignIn);
     el('signOutBtn').addEventListener('click', handleSignOut);
     el('workerCheckBtn').addEventListener('click', checkWorker);
+    el('verifyBtn').addEventListener('click', handleVerify);
 
     el('enableEncryptionBtn').addEventListener('click', handleEnableEncryption);
     el('unlockBtn').addEventListener('click', handleUnlock);

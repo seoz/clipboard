@@ -160,16 +160,21 @@ Per-user isolation, exact field sets via `hasOnly` (which closes the "use my own
 
 The rules **cannot** validate the ciphertext — that is the entire point of end-to-end encryption, not an oversight. They validate ownership, shape and size; the encryption validates content.
 
-### 8.4 Sync engine (not yet built)
+### 8.4 Sync engine (built)
 
-- **Two-way, last-write-wins on `updatedAt`,** tie-broken on id for determinism. On first sign-in, local and cloud entries merge with client-side dedup by content — the server cannot help, it holds ciphertext. Two consequences to surface to users rather than let them discover: a concurrent edit on two devices loses one side entirely, and frequency counts are lossy across devices.
-- **Writes stay decoupled from the network.** `save()` will additionally record touched ids in a dirty queue; the worker, woken by `chrome.alarms`, flushes them. This is what keeps the §4.1 copy path — one write per copy, followed 100ms later by the popup closing — from becoming a network round trip per copy against a dying page. An id-keyed set also coalesces ten rapid copies into one write carrying the final count.
-- **`firebase/firestore/lite`, not the full SDK.** No realtime listeners (a popup lives for seconds), no WebChannel transport to fight with in worker contexts, and no built-in offline layer competing with our own queue.
+**Push.** `save()` records touched ids in a dirty queue rather than awaiting the network; the worker, woken by `chrome.alarms`, encrypts and uploads them in a batch. This is what keeps the §4.1 copy path — one write per copy, followed 100ms later by the popup closing — from becoming a network round trip against a dying page. The queue is a set of ids, not a log, so ten rapid copies of one snippet collapse into a single upload carrying the final count. `permission-denied`/`unauthenticated` are treated as fatal and not retried — the session or the rules are wrong, and retrying can't fix either; anything else backs off 30s → 1m → 5m → 15m.
+
+**First merge.** Runs once per device, the first time it holds both a decryption key and has never pulled before (`lastPullAt === 0` is the signal). Entirely client-side and read-only until confirmed: the server holds ciphertext and cannot compare or dedup by content, and any decrypt failure aborts the whole plan rather than partially merging under what might be the wrong key. Local and remote entries are fused by `dedupKey` — trimmed, NFC-normalized text — with the **remote id winning** so both devices converge on one identity, `frequency = max` (summing would double-count on a repeated merge), and `timestamp = min`. Local tombstones are dropped outright; nothing in a delete is worth preserving into a fresh account pairing. The plan is shown to the user (counts and duplicate count) and applied only on confirmation — the one irreversible step in the whole design.
+
+**Steady-state pull**, run after every push so a device's own edits are never shadowed by something older arriving in the same cycle: a delta query (`updatedAt > lastPullAt`, with a 5s skew buffer) turns a full resync into a handful of reads. Merge is **last-write-wins on `updatedAt`** per record; a genuine tie (identical millisecond, different content — vanishingly rare) breaks on the decrypted text lexicographically, chosen because it's deterministic and doesn't depend on which device evaluates it, so both sides converge on the same answer independently. Two consequences that are surfaced rather than silently absorbed: **a concurrent edit on two devices loses one side's text entirely**, and **frequency is lossy across devices** (a copy on A and one on B in the same window yields +1, not +2, since only the winning `updatedAt` survives).
+
+A device idle more than 30 days falls back from the delta query to a full read. That bound exists because of tombstone garbage collection: a daily alarm hard-deletes tombstones older than 30 days, and a device that missed the delete entirely (rather than seeing the tombstone and reconciling it) could otherwise resurrect an entry nobody meant to keep.
+
+**`firebase/firestore/lite`, not the full SDK.** No realtime listeners (a popup lives for seconds), no WebChannel transport to fight with in worker contexts, and no built-in offline layer competing with the queue described above.
 
 ## 9. Known limitations / possible follow-ups
 
-- No de-duplication on add; identical text can be saved multiple times as distinct entries. Import de-duplicates by id, not by content.
-- Hard cap of 20 items for local-only use, lifted by sign-in once §8 lands.
-- Tombstones accumulate indefinitely without sync enabled; garbage collection arrives with §8.
+- No de-duplication on add; identical text can be saved multiple times as distinct entries. Import de-duplicates by id, not by content; first-merge deduplicates by content, but only once, at merge time.
+- Hard cap of 20 items still applies to local-only (signed-out) use; lifting it for signed-in users is not yet built.
 - `TextManager` is still a large `document`-coupled class doing routing, rendering, and mutation. It is the natural next extraction if it keeps growing.
-- `chrome.storage.local` is per-device; there is no cross-device sync yet (§8).
+- The two-device merge and pull paths are covered by unit tests against a faithful mock of Firestore's query semantics, but not yet by an actual two-profile, two-account run — that verification needs a human at two real devices and is recorded as the acceptance step for this phase rather than something that can be automated here.

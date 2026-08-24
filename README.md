@@ -77,7 +77,15 @@ holds unreadable data.
 You can choose how long a device stays unlocked — 7 days, until Chrome
 restarts, or ask every time — and lock it immediately with **Lock now**.
 
-Snippets don't move between devices yet; that part is still being built.
+On sign-in (or unlocking on a new device), if this device and the server both
+have snippets, you'll see a summary — "This device has 12 snippets, and the
+server has 8, 3 of which look identical. Combining them leaves 17 total." —
+before anything is combined. That's the one step that can't be undone, so
+nothing happens until you confirm it.
+
+After that, edits sync both ways: add, edit, delete, or reorder on one device
+and it appears on the others within about 30 seconds, or the next time you
+open the extension.
 
 ## Development
 

@@ -91,6 +91,17 @@ class TextManager {
         button.title = title;
     }
 
+    /**
+     * Only ever shown to signed-out users — a signed-in device has no cap
+     * (maxTexts is Infinity), so this branch is unreachable once syncEnabled.
+     * The cap is real, but it's also the one moment sign-in has an obvious,
+     * immediate payoff worth mentioning right there.
+     */
+    capReachedMessage() {
+        return `Maximum ${this.maxTexts} texts. Sign in to sync for unlimited snippets, ` +
+            'or delete some to keep going.';
+    }
+
     requestSync() {
         // No await, and errors are swallowed: a missing worker must never
         // break a local edit.
@@ -191,7 +202,7 @@ class TextManager {
             this.renderTexts();
 
             if (truncated) {
-                this.showToast(`Imported ${added}. Storage full at ${this.maxTexts}.`, 'error');
+                this.showToast(`Imported ${added}. ${this.capReachedMessage()}`, 'error');
             } else if (added > 0) {
                 this.showToast(`Imported ${added} text${added === 1 ? '' : 's'}` +
                     (skipped ? ` (${skipped} already present)` : ''));
@@ -404,8 +415,7 @@ class TextManager {
             dirty = editing.id;
         } else {
             if (this.texts.filter(isLive).length >= this.maxTexts) {
-                this.showToast(
-                    `Maximum ${this.maxTexts} texts. Delete some first.`, 'error');
+                this.showToast(this.capReachedMessage(), 'error');
                 return;
             }
             const maxOrder = this.texts.reduce((max, e) => Math.max(max, e.order), 0);

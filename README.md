@@ -60,7 +60,7 @@ The 💾 button saves all your texts to a `clipboard-backup.json` file, and 📂
 loads one back in. Importing adds texts you don't already have and skips ones
 you do, so importing the same backup twice won't create duplicates.
 
-## Syncing across devices (in progress)
+## Syncing across devices
 
 Signing in is optional — QuickPaste works fully without an account, and stores
 nothing anywhere but your own machine unless you ask it to.
@@ -85,7 +85,33 @@ nothing happens until you confirm it.
 
 After that, edits sync both ways: add, edit, delete, or reorder on one device
 and it appears on the others within about 30 seconds, or the next time you
-open the extension.
+open the extension. Signing in also removes the 20-snippet limit.
+
+The account button in the toolbar shows what's happening at a glance:
+synced, waiting to sync, locked, offline, or a specific problem like an
+expired sign-in or a full storage quota — never just a generic error.
+
+If a snippet ever shows **"⚠️ Could not decrypt this snippet"**, this device
+doesn't have the right passphrase for it — usually because the passphrase was
+changed on another device. It's safe on the server; unlocking with the
+current passphrase resolves it. That row can't be copied, edited, or deleted
+until then, since deleting something this device can't read would delete it
+for every device, including ones that can read it fine.
+
+### Changing your passphrase
+
+From the options page, **Change passphrase** re-encrypts and re-uploads every
+snippet under a new passphrase. As before, there's no way to recover it if
+you forget it. Other devices keep working locally, but stop receiving your
+updates until you enter the new passphrase there too.
+
+### Starting over
+
+**Delete all cloud data**, in the options page's danger zone, removes
+everything from the server and forgets your passphrase setup. It does not
+touch the snippets on your device, and does not sign you out of Google — only
+sync itself is reset. You'll need to set a new passphrase to turn syncing
+back on.
 
 ## Development
 

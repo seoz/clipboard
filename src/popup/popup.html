@@ -12,10 +12,14 @@
     <div class="container">
         <header class="header">
             <div class="header-left">
-                <img src="icons/icon32.png" alt="QuickPaste" class="header-icon">
+                <img src="/icons/icon32.png" alt="QuickPaste" class="header-icon">
                 <h1>QuickPaste</h1>
             </div>
             <div class="header-actions">
+                <button id="syncBtn" class="icon-btn" title="Account &amp; sync" hidden>
+                    <span class="icon" id="syncIcon">☁️</span>
+                    <span class="sync-dot" id="syncDot"></span>
+                </button>
                 <button id="importBtn" class="icon-btn" title="Import texts from file">
                     <span class="icon">📂</span>
                 </button>
@@ -45,7 +49,7 @@
 
         <div class="empty-state" id="emptyState">
             <div class="empty-icon">📝</div>
-            <p>No texts saved yet</p>
+            <p class="empty-title">No texts saved yet</p>
             <p class="empty-subtitle">Click the + button to add your first text</p>
         </div>
     </div>
@@ -67,7 +71,7 @@
         </div>
     </div>
 
-    <script src="popup.js"></script>
+    <script type="module" src="popup.js"></script>
 </body>
 
 </html>

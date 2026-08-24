@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QuickPaste — Account &amp; Sync</title>
+    <link rel="stylesheet" href="options.css">
+</head>
+
+<body>
+    <main class="page">
+        <header class="page-header">
+            <img src="/icons/icon48.png" alt="" class="page-icon">
+            <div>
+                <h1>QuickPaste</h1>
+                <p class="page-subtitle">Account &amp; sync</p>
+            </div>
+        </header>
+
+        <section class="card" id="setupCard" hidden>
+            <h2>Setup needed</h2>
+            <p class="muted" id="setupMessage"></p>
+        </section>
+
+        <section class="card" id="accountCard" hidden>
+            <h2>Account</h2>
+
+            <div id="signedOut">
+                <p class="muted">
+                    Sign in to sync your snippets across devices. Your snippets are
+                    encrypted on this device before they're uploaded, so nobody —
+                    including us — can read them on the server.
+                </p>
+                <button id="signInBtn" class="primary-btn">Sign in with Google</button>
+            </div>
+
+            <div id="signedIn" hidden>
+                <div class="account-row">
+                    <span class="account-label">Signed in as</span>
+                    <span class="account-email" id="accountEmail"></span>
+                </div>
+                <button id="signOutBtn" class="secondary-btn">Sign out</button>
+            </div>
+
+            <p class="status" id="status" role="status" aria-live="polite"></p>
+        </section>
+
+        <section class="card" id="encryptionCard" hidden>
+            <h2>Encryption</h2>
+
+            <!-- First-time setup -->
+            <div id="passphraseSetup" hidden>
+                <p class="muted">
+                    Choose a passphrase. Your snippets are encrypted with it on this
+                    device before anything is uploaded, so the server only ever stores
+                    unreadable data.
+                </p>
+
+                <div class="warning">
+                    <strong>There is no way to recover this passphrase.</strong>
+                    Not by you, and not by us — that's what makes the encryption
+                    meaningful. If you forget it, your synced snippets are gone for good.
+                    Write it down somewhere safe.
+                </div>
+
+                <label class="field">
+                    <span>Passphrase</span>
+                    <input type="password" id="newPassphrase" autocomplete="new-password">
+                </label>
+                <label class="field">
+                    <span>Confirm passphrase</span>
+                    <input type="password" id="confirmPassphrase" autocomplete="new-password">
+                </label>
+                <label class="checkbox">
+                    <input type="checkbox" id="ackLoss">
+                    <span>I understand my snippets can't be recovered if I forget this.</span>
+                </label>
+
+                <button id="enableEncryptionBtn" class="primary-btn" disabled>
+                    Set passphrase
+                </button>
+            </div>
+
+            <!-- Returning, but locked -->
+            <div id="passphraseUnlock" hidden>
+                <p class="muted">
+                    Enter your passphrase to unlock encrypted syncing on this device.
+                </p>
+                <label class="field">
+                    <span>Passphrase</span>
+                    <input type="password" id="unlockPassphrase" autocomplete="current-password">
+                </label>
+                <button id="unlockBtn" class="primary-btn">Unlock</button>
+            </div>
+
+            <!-- Unlocked -->
+            <div id="passphraseUnlocked" hidden>
+                <p class="unlocked-state">🔓 Unlocked on this device.</p>
+
+                <label class="field">
+                    <span>Stay unlocked for</span>
+                    <select id="lockPolicy">
+                        <option value="week">7 days</option>
+                        <option value="session">Until Chrome restarts</option>
+                        <option value="always">Ask every time</option>
+                    </select>
+                </label>
+                <p class="muted" id="lockPolicyHint"></p>
+
+                <button id="lockNowBtn" class="secondary-btn">Lock now</button>
+            </div>
+
+            <p class="status" id="cryptoStatus" role="status" aria-live="polite"></p>
+        </section>
+
+        <section class="card" id="mergeCard" hidden>
+            <h2>Combine with this device</h2>
+            <p class="muted" id="mergeSummary"></p>
+            <div class="warning" id="mergeWarning" hidden>
+                This can't be undone. Consider exporting a backup first, from
+                the extension popup's 💾 button.
+            </div>
+            <div class="button-row">
+                <button id="confirmMergeBtn" class="primary-btn">Combine</button>
+                <button id="cancelMergeBtn" class="secondary-btn">Not now</button>
+            </div>
+            <p class="status" id="mergeStatus" role="status" aria-live="polite"></p>
+        </section>
+
+        <section class="card" id="diagnosticsCard" hidden>
+            <h2>Diagnostics</h2>
+            <p class="muted">
+                Checks that the background worker can restore your session and mint a
+                fresh token on its own — which is what lets sync run while the popup
+                is closed.
+            </p>
+            <div class="button-row">
+                <button id="workerCheckBtn" class="secondary-btn">Check background worker</button>
+                <button id="verifyBtn" class="secondary-btn">Verify sync</button>
+            </div>
+            <p class="muted" id="verifyHint">
+                <strong>Verify sync</strong> downloads everything the server holds,
+                decrypts it here, and compares it with what's on this device. The
+                Firestore console can't show you this — everything there is
+                encrypted.
+            </p>
+            <div id="verifySummary" hidden></div>
+            <pre class="diagnostics-output" id="workerOutput" hidden></pre>
+        </section>
+    </main>
+
+    <script type="module" src="options.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,24 @@
+{
+  "name": "quickpaste",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Store and manage multiple texts with easy clipboard access",
+  "scripts": {
+    "dev": "vite build --watch --mode development",
+    "build": "vite build",
+    "test": "vitest run --config vitest.config.js",
+    "test:watch": "vitest --config vitest.config.js",
+    "emulators": "./scripts/with-java.sh firebase emulators:start --only auth,firestore",
+    "rules:deploy": "firebase deploy --only firestore:rules"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.2",
+    "firebase-tools": "^15.28.1",
+    "vite": "^7.1.5",
+    "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "firebase": "^12.18.0"
+  }
+}

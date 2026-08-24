@@ -81,3 +81,25 @@ export async function getLastPullAt() {
 export async function setLastPullAt(at) {
     await chrome.storage.local.set({ [LAST_PULL_KEY]: at });
 }
+
+// ---- last sync error -------------------------------------------------
+
+const LAST_ERROR_KEY = 'lastSyncError';
+
+/**
+ * A single slot for "the last thing that went wrong", read cheaply by the
+ * popup so it can show a specific status without itself calling push/pull.
+ * @param info {{ source: 'push'|'pull', code: string, message: string, fatal: boolean }}
+ */
+export async function setLastError(info) {
+    await chrome.storage.local.set({ [LAST_ERROR_KEY]: { ...info, at: Date.now() } });
+}
+
+export async function getLastError() {
+    const { [LAST_ERROR_KEY]: error } = await chrome.storage.local.get(LAST_ERROR_KEY);
+    return error ?? null;
+}
+
+export async function clearLastError() {
+    await chrome.storage.local.remove(LAST_ERROR_KEY);
+}

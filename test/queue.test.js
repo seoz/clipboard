@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
     getPending, markDirty, clearPending,
     getBackoff, recordFailure, clearBackoff, inBackoff,
-    getLastPullAt, setLastPullAt
+    getLastPullAt, setLastPullAt,
+    getLastError, setLastError, clearLastError
 } from '../src/lib/queue.js';
 
 function fakeStorage(initial = {}) {
@@ -14,7 +15,11 @@ function fakeStorage(initial = {}) {
                     const list = Array.isArray(keys) ? keys : [keys];
                     return Object.fromEntries(list.filter(k => k in data).map(k => [k, data[k]]));
                 },
-                set: async patch => { data = { ...data, ...patch }; }
+                set: async patch => { data = { ...data, ...patch }; },
+                remove: async keys => {
+                    const list = Array.isArray(keys) ? keys : [keys];
+                    list.forEach(k => { delete data[k]; });
+                }
             }
         }
     };
@@ -106,5 +111,30 @@ describe('pull cursor', () => {
     it('round-trips', async () => {
         await setLastPullAt(1234);
         expect(await getLastPullAt()).toBe(1234);
+    });
+});
+
+describe('last sync error', () => {
+    it('starts clear', async () => {
+        expect(await getLastError()).toBeNull();
+    });
+
+    it('round-trips and stamps a timestamp', async () => {
+        await setLastError({ source: 'push', code: 'unavailable', message: 'offline', fatal: false });
+        const error = await getLastError();
+        expect(error).toMatchObject({ source: 'push', code: 'unavailable', fatal: false });
+        expect(error.at).toBeTypeOf('number');
+    });
+
+    it('the latest call wins over an earlier one', async () => {
+        await setLastError({ source: 'push', code: 'unavailable', fatal: false });
+        await setLastError({ source: 'pull', code: 'permission-denied', fatal: true });
+        expect((await getLastError()).source).toBe('pull');
+    });
+
+    it('clears', async () => {
+        await setLastError({ source: 'push', code: 'unavailable', fatal: false });
+        await clearLastError();
+        expect(await getLastError()).toBeNull();
     });
 });

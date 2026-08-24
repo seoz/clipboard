@@ -96,7 +96,10 @@ function fakeStorage() {
     globalThis.chrome = { storage: { local: {
         get: async keys => Object.fromEntries(
             (Array.isArray(keys) ? keys : [keys]).filter(k => k in data).map(k => [k, data[k]])),
-        set: async patch => { data = { ...data, ...patch }; }
+        set: async patch => { data = { ...data, ...patch }; },
+        remove: async keys => {
+            (Array.isArray(keys) ? keys : [keys]).forEach(k => { delete data[k]; });
+        }
     } } };
 }
 

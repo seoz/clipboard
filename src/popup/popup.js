@@ -1,4 +1,5 @@
 import { loadState, saveState } from '../lib/store.js';
+import { syncStatusView } from '../lib/syncStatus.js';
 import { MSG } from '../shared/messages.js';
 import {
     newEntry, normalizeEntry, migrateToV2, isLive, touch,
@@ -76,15 +77,18 @@ class TextManager {
             // floor, but this ensures a cycle is scheduled at all.
             this.requestSync();
 
-            const { pending = 0 } = await chrome.runtime.sendMessage({ type: MSG.SYNC_STATUS }) ?? {};
-            button.dataset.state = pending > 0 ? 'pending' : 'synced';
-            button.title = pending > 0
-                ? `${pending} change${pending === 1 ? '' : 's'} waiting to sync`
-                : 'Everything is synced';
+            const status = await chrome.runtime.sendMessage({ type: MSG.SYNC_STATUS }) ?? {};
+            this.applySyncStatus(button, status);
         } catch {
             // No worker, or it's still waking. Local editing is unaffected.
             button.hidden = true;
         }
+    }
+
+    applySyncStatus(button, status) {
+        const { state, title } = syncStatusView({ ...status, online: navigator.onLine });
+        button.dataset.state = state;
+        button.title = title;
     }
 
     requestSync() {

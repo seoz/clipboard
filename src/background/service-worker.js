@@ -15,12 +15,12 @@
 
 import { currentUser } from '../lib/auth.js';
 import { isConfigured } from '../lib/firebase.js';
-import { purgeIfSessionScoped } from '../lib/keycache.js';
+import { purgeIfSessionScoped, getCachedKey } from '../lib/keycache.js';
 import {
     push, pull, verify, gcTombstones,
     previewFirstMerge, applyFirstMerge, SyncOutcome
 } from '../lib/sync.js';
-import { getPending } from '../lib/queue.js';
+import { getPending, getLastError, setLastError, clearLastError } from '../lib/queue.js';
 import { MSG } from '../shared/messages.js';
 
 const SYNC_ALARM = 'sync-flush';
@@ -75,6 +75,7 @@ async function flush() {
     }
 
     await updateBadge();
+    await recordOutcome(pushResult, pullResult);
 
     const ok = [SyncOutcome.PUSHED, SyncOutcome.NOTHING_TO_DO].includes(pushResult.outcome)
         && [SyncOutcome.PULLED, SyncOutcome.NOTHING_TO_DO, SyncOutcome.NEEDS_FIRST_MERGE, 'skipped']
@@ -85,6 +86,36 @@ async function flush() {
         push: { ...pushResult, error: pushResult.error?.message },
         pull: pullResult
     };
+}
+
+/**
+ * Keep a single "last problem" slot up to date, so the popup can show a
+ * specific reason without itself calling push/pull. Push is treated as the
+ * more actionable signal — a broken session shows up there first — but
+ * either side clears the slot as soon as both have gone clean.
+ */
+async function recordOutcome(pushResult, pullResult) {
+    if (pushResult.outcome === SyncOutcome.FAILED) {
+        await setLastError({
+            source: 'push',
+            code: pushResult.error?.code ?? 'unknown',
+            message: pushResult.error?.message ?? 'Push failed',
+            fatal: Boolean(pushResult.fatal)
+        });
+        return;
+    }
+
+    if (pullResult.outcome === 'error') {
+        await setLastError({
+            source: 'pull',
+            code: pullResult.message?.includes('permission-denied') ? 'permission-denied' : 'unknown',
+            message: pullResult.message ?? 'Pull failed',
+            fatal: false
+        });
+        return;
+    }
+
+    await clearLastError();
 }
 
 /**
@@ -131,9 +162,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
 
     if (message?.type === MSG.SYNC_STATUS) {
-        getPending()
-            .then(pending => sendResponse({ pending: pending.length }))
-            .catch(() => sendResponse({ pending: 0 }));
+        // All three reads are local (chrome.storage / IndexedDB) — no network,
+        // so this is safe to call on every popup open without adding latency.
+        Promise.all([getPending(), currentUser(), getLastError()])
+            .then(async ([pending, user, lastError]) => {
+                const locked = user ? !(await getCachedKey(user.uid)) : false;
+                sendResponse({ pending: pending.length, locked, lastError });
+            })
+            .catch(() => sendResponse({ pending: 0, locked: false, lastError: null }));
         return true;
     }
 

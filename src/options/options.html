@@ -109,6 +109,37 @@
                 <p class="muted" id="lockPolicyHint"></p>
 
                 <button id="lockNowBtn" class="secondary-btn">Lock now</button>
+                <button id="showChangePassphraseBtn" class="secondary-btn">Change passphrase</button>
+            </div>
+
+            <div id="changePassphrase" hidden>
+                <p class="muted">
+                    Every snippet is re-encrypted and re-uploaded with the new
+                    passphrase — that can take a moment for a large collection.
+                    Other devices will need the new passphrase the next time
+                    they unlock; until then they'll simply stop receiving your
+                    updates rather than losing anything.
+                </p>
+                <div class="warning">
+                    <strong>There is still no way to recover this passphrase.</strong>
+                    Write the new one down somewhere safe before continuing.
+                </div>
+                <label class="field">
+                    <span>New passphrase</span>
+                    <input type="password" id="rotatePassphraseNew" autocomplete="new-password">
+                </label>
+                <label class="field">
+                    <span>Confirm new passphrase</span>
+                    <input type="password" id="rotatePassphraseConfirm" autocomplete="new-password">
+                </label>
+                <label class="checkbox">
+                    <input type="checkbox" id="rotateAckLoss">
+                    <span>I understand my synced snippets can't be recovered if I forget this.</span>
+                </label>
+                <div class="button-row">
+                    <button id="confirmRotateBtn" class="primary-btn" disabled>Change passphrase</button>
+                    <button id="cancelRotateBtn" class="secondary-btn">Cancel</button>
+                </div>
             </div>
 
             <p class="status" id="cryptoStatus" role="status" aria-live="polite"></p>

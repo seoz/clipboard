@@ -18,7 +18,8 @@ import { isConfigured } from '../lib/firebase.js';
 import { purgeIfSessionScoped, getCachedKey } from '../lib/keycache.js';
 import {
     push, pull, verify, gcTombstones,
-    previewFirstMerge, applyFirstMerge, SyncOutcome
+    previewFirstMerge, applyFirstMerge,
+    rotatePassphrase, SyncOutcome
 } from '../lib/sync.js';
 import { getPending, getLastError, setLastError, clearLastError } from '../lib/queue.js';
 import { MSG } from '../shared/messages.js';
@@ -197,6 +198,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
     if (message?.type === MSG.APPLY_MERGE) {
         applyFirstMerge(message.plan)
+            .then(async result => { await updateBadge(); return result; })
+            .then(sendResponse)
+            .catch(error => sendResponse({ outcome: 'error', message: error.message }));
+        return true;
+    }
+
+    if (message?.type === MSG.ROTATE_PASSPHRASE) {
+        // The passphrase crosses this message, but both ends are the same
+        // extension's own privileged code — no different a boundary than
+        // calling the function directly would be. It's centralized here
+        // rather than called from the options page so the resulting entry
+        // re-push can't race the worker's own alarm-driven push/pull over the
+        // same chrome.storage.local queue.
+        rotatePassphrase(message.newPassphrase, message.account, message.lockPolicy)
             .then(async result => { await updateBadge(); return result; })
             .then(sendResponse)
             .catch(error => sendResponse({ outcome: 'error', message: error.message }));

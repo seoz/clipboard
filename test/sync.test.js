@@ -11,8 +11,21 @@ let failCommitAt = null;
 /** Stand-in for what the server holds: id -> stored document. */
 const remote = new Map();
 
+/** Stand-in for the users/{uid} account doc, separate from `remote`. */
+const accountDocs = new Map();
+
 vi.mock('firebase/firestore/lite', () => ({
-    doc: (_ref, id) => ({ id }),
+    // Two call shapes share this mock: doc(entriesRef, id) for an entry, and
+    // doc(db, 'users', uid) for the account doc — disambiguated by arity,
+    // matching how account.js and the entry paths actually call it.
+    doc: (ref, ...rest) => rest.length === 1
+        ? { id: rest[0], kind: 'entry' }
+        : { id: rest[rest.length - 1], kind: 'account' },
+    getDoc: async ref => {
+        const data = accountDocs.get(ref.id);
+        return { exists: () => data !== undefined, data: () => data };
+    },
+    setDoc: async (ref, data) => { accountDocs.set(ref.id, data); },
     collection: (_db, ...path) => ({ path: path.join('/'), __constraints: [] }),
     query: (ref, ...constraints) => ({ __constraints: constraints }),
     where: (field, op, value) => ({ type: 'where', field, op, value }),
@@ -54,11 +67,17 @@ let user = { uid: 'uid-1' };
 vi.mock('../src/lib/auth.js', () => ({ currentUser: async () => user }));
 
 let key = 'fake-key';
-vi.mock('../src/lib/keycache.js', () => ({ getCachedKey: async () => key }));
+vi.mock('../src/lib/keycache.js', () => ({
+    getCachedKey: async () => key,
+    cacheKey: async newKey => { key = newKey; }
+}));
 
 vi.mock('../src/lib/crypto.js', () => ({
-    encryptJson: async (_k, value, aad) => ({
-        iv: 'IV', ct: Buffer.from(JSON.stringify({ value, aad })).toString('base64')
+    // The key is folded into the sealed payload (real AES-GCM obviously
+    // wouldn't do this) purely so rotation tests can see which key a given
+    // ciphertext was actually produced under.
+    encryptJson: async (k, value, aad) => ({
+        iv: 'IV', ct: Buffer.from(JSON.stringify({ key: k, value, aad })).toString('base64')
     }),
     // Mirrors the real contract: decrypting under a mismatched AAD throws,
     // which is what binds a ciphertext to its own entry id.
@@ -67,7 +86,12 @@ vi.mock('../src/lib/crypto.js', () => ({
             Buffer.from(record.ct, 'base64').toString());
         if (sealedAad !== aad) throw new Error('bad AAD');
         return value;
-    }
+    },
+    createKdfSetup: async passphrase => ({
+        key: `key-for-${passphrase}`,
+        kdf: { alg: 'PBKDF2-SHA256', iterations: 1000, salt: 'SALT-FOR-' + passphrase },
+        verifier: { iv: 'IV', ct: 'VERIFIER-FOR-' + passphrase }
+    })
 }));
 
 let texts = [];
@@ -77,11 +101,20 @@ vi.mock('../src/lib/store.js', () => ({
     saveState: async ({ texts: t, sortMode, dirtyIds = [] }) => {
         texts = t;
         savedStateCalls.push({ sortMode, dirtyIds });
+        // The real queue.js is not mocked (see `queue` below), so route
+        // through it for real — push() reads getPending() directly, and
+        // without this a caller like rotatePassphrase() that saves and then
+        // immediately pushes would see an empty queue.
+        if (dirtyIds.length) {
+            const { markDirty } = await import('../src/lib/queue.js');
+            await markDirty(dirtyIds);
+        }
     }
 }));
 
 const {
-    push, pull, verify, previewFirstMerge, applyFirstMerge, gcTombstones, SyncOutcome
+    push, pull, verify, previewFirstMerge, applyFirstMerge, gcTombstones,
+    rotatePassphrase, SyncOutcome
 } = await import('../src/lib/sync.js');
 const queue = await import('../src/lib/queue.js');
 
@@ -105,6 +138,7 @@ function fakeStorage() {
 
 beforeEach(() => {
     remote.clear();
+    accountDocs.clear();
     commits.length = 0;
     commitError = null;
     failCommitAt = null;
@@ -702,5 +736,92 @@ describe('gcTombstones', () => {
     it('refuses signed out', async () => {
         user = null;
         expect((await gcTombstones()).outcome).toBe(SyncOutcome.SIGNED_OUT);
+    });
+});
+
+describe('rotatePassphrase', () => {
+    it('refuses signed out or locked', async () => {
+        user = null;
+        expect((await rotatePassphrase('new-passphrase-1', {}, 'week')).outcome)
+            .toBe(SyncOutcome.SIGNED_OUT);
+        user = { uid: 'uid-1' };
+        key = null;
+        expect((await rotatePassphrase('new-passphrase-1', {}, 'week')).outcome)
+            .toBe(SyncOutcome.LOCKED);
+    });
+
+    it('rotates the account doc, preserving createdAt and moving updatedAt forward', async () => {
+        accountDocs.set('uid-1', {
+            schemaVersion: 2,
+            kdf: { alg: 'PBKDF2-SHA256', iterations: 600000, salt: 'OLD-SALT' },
+            verifier: { iv: 'iv', ct: 'old-verifier' },
+            createdAt: 1000, updatedAt: 2000
+        });
+        const existing = accountDocs.get('uid-1');
+
+        await rotatePassphrase('brand-new-passphrase', existing, 'week');
+
+        const rotated = accountDocs.get('uid-1');
+        expect(rotated.createdAt).toBe(1000);              // pinned
+        expect(rotated.updatedAt).toBeGreaterThan(2000);    // moved forward
+        expect(rotated.kdf.salt).toBe('SALT-FOR-brand-new-passphrase');
+        expect(rotated.verifier.ct).toBe('VERIFIER-FOR-brand-new-passphrase');
+    });
+
+    it('re-caches the key so subsequent operations use it', async () => {
+        accountDocs.set('uid-1', { createdAt: 1000, updatedAt: 2000 });
+        await rotatePassphrase('brand-new-passphrase', accountDocs.get('uid-1'), 'week');
+        expect(key).toBe('key-for-brand-new-passphrase');
+    });
+
+    it('bumps every live entry and re-pushes it under the new key', async () => {
+        accountDocs.set('uid-1', { createdAt: 1000, updatedAt: 2000 });
+        texts = [
+            entry('a', { updatedAt: 1000 }),
+            entry('b', { updatedAt: 1000, deletedAt: 5000 })   // tombstones too
+        ];
+
+        const result = await rotatePassphrase('brand-new-passphrase', accountDocs.get('uid-1'), 'week');
+
+        expect(result.outcome).toBe(SyncOutcome.ROTATED);
+        expect(result.count).toBe(2);
+        expect(texts.every(t => t.updatedAt > 1000)).toBe(true);
+
+        // Actually landed on the server, encrypted under the new key.
+        expect(commits.flat()).toHaveLength(2);
+        const decoded = JSON.parse(Buffer.from(commits[0][0].data.ct, 'base64').toString());
+        expect(decoded.key).toBe('key-for-brand-new-passphrase');
+    });
+
+    it('never touches an undecryptable placeholder', async () => {
+        // The hazard this exists to prevent: re-encrypting null over content
+        // this device can't read would destroy it for devices that can.
+        accountDocs.set('uid-1', { createdAt: 1000, updatedAt: 2000 });
+        texts = [
+            entry('a', { updatedAt: 1000 }),
+            entry('broken', { text: null, undecryptable: true, updatedAt: 1000 })
+        ];
+
+        const result = await rotatePassphrase('brand-new-passphrase', accountDocs.get('uid-1'), 'week');
+
+        expect(result.count).toBe(1);
+        expect(texts.find(t => t.id === 'broken').updatedAt).toBe(1000);   // untouched
+        expect(commits.flat().map(w => w.id)).toEqual(['a']);
+        expect(remote.has('broken')).toBe(false);   // never written
+    });
+
+    it('surfaces a push failure without leaving the account doc mismatched', async () => {
+        accountDocs.set('uid-1', { createdAt: 1000, updatedAt: 2000 });
+        texts = [entry('a', { updatedAt: 1000 })];
+        commitError = Object.assign(new Error('offline'), { code: 'unavailable' });
+
+        const result = await rotatePassphrase('brand-new-passphrase', accountDocs.get('uid-1'), 'week');
+
+        expect(result.outcome).toBe(SyncOutcome.ROTATED);
+        expect(result.pushResult.outcome).toBe(SyncOutcome.FAILED);
+        // The account doc still rotated — a retried push later succeeds under
+        // the same (already-rotated) key rather than needing to rotate again.
+        expect(accountDocs.get('uid-1').kdf.salt).toBe('SALT-FOR-brand-new-passphrase');
+        expect(await queue.getPending()).toEqual(['a']);   // preserved for retry
     });
 });

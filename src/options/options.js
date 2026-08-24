@@ -348,6 +348,72 @@ async function handleLockPolicyChange(event) {
     setCryptoStatus('Auto-lock updated.', 'ok');
 }
 
+// ---- change passphrase ----------------------------------------------------
+
+function rotateFormValid() {
+    return el('rotatePassphraseNew').value.length > 0
+        && el('rotatePassphraseConfirm').value.length > 0
+        && el('rotateAckLoss').checked;
+}
+
+function refreshRotateButton() {
+    el('confirmRotateBtn').disabled = !rotateFormValid();
+}
+
+function showChangePassphraseForm() {
+    el('changePassphrase').hidden = false;
+    el('rotatePassphraseNew').value = '';
+    el('rotatePassphraseConfirm').value = '';
+    el('rotateAckLoss').checked = false;
+    refreshRotateButton();
+}
+
+function hideChangePassphraseForm() {
+    el('changePassphrase').hidden = true;
+}
+
+async function handleConfirmRotate() {
+    const passphrase = el('rotatePassphraseNew').value;
+    const confirm = el('rotatePassphraseConfirm').value;
+
+    const problem = validatePassphrase(passphrase);
+    if (problem) return setCryptoStatus(problem, 'error');
+    if (passphrase !== confirm) return setCryptoStatus("Those don't match.", 'error');
+
+    const button = el('confirmRotateBtn');
+    button.disabled = true;
+    setCryptoStatus('Re-encrypting your snippets… this can take a moment.');
+
+    try {
+        const policy = await storedLockPolicy();
+        const result = await chrome.runtime.sendMessage({
+            type: MSG.ROTATE_PASSPHRASE, newPassphrase: passphrase, account, lockPolicy: policy
+        });
+
+        if (result.outcome !== 'rotated') throw new Error(result.message || 'Could not change passphrase');
+
+        account = await getAccount(activeUid);
+        hideChangePassphraseForm();
+        await renderEncryption({ uid: activeUid });
+
+        if (result.pushResult?.outcome === 'pushed' || result.pushResult?.outcome === 'nothing-to-do') {
+            setCryptoStatus(`Passphrase changed — ${result.count} snippets re-encrypted and synced.`, 'ok');
+        } else {
+            // The account doc rotated successfully; the entry re-upload just
+            // hasn't finished yet. Not a failure — the worker retries this
+            // on its own, same as any other push.
+            setCryptoStatus(
+                `Passphrase changed. Re-encrypting ${result.count} snippets in the background — ` +
+                'this will finish automatically.', 'ok');
+        }
+    } catch (error) {
+        console.error('Passphrase change failed:', error);
+        setCryptoStatus(describe(error), 'error');
+    } finally {
+        button.disabled = false;
+    }
+}
+
 /**
  * Read the server back and compare. Rendered as a summary rather than raw JSON,
  * because the useful answer is "yes, and here's the count" or "no, and here's
@@ -471,6 +537,12 @@ async function main() {
     el('unlockPassphrase').addEventListener('keydown', e => {
         if (e.key === 'Enter') handleUnlock();
     });
+
+    el('showChangePassphraseBtn').addEventListener('click', showChangePassphraseForm);
+    el('cancelRotateBtn').addEventListener('click', hideChangePassphraseForm);
+    el('confirmRotateBtn').addEventListener('click', handleConfirmRotate);
+    ['rotatePassphraseNew', 'rotatePassphraseConfirm', 'rotateAckLoss'].forEach(id =>
+        el(id).addEventListener('input', refreshRotateButton));
 
     renderUser(await currentUser());
     watchAuth(renderUser);

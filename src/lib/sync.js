@@ -12,8 +12,9 @@ import {
 } from 'firebase/firestore/lite';
 import { getDb } from './firebase.js';
 import { currentUser } from './auth.js';
-import { getCachedKey } from './keycache.js';
-import { encryptJson, decryptJson } from './crypto.js';
+import { getCachedKey, cacheKey } from './keycache.js';
+import { encryptJson, decryptJson, createKdfSetup } from './crypto.js';
+import { rotateAccount } from './account.js';
 import { loadState, saveState } from './store.js';
 import { isLive, dedupKey, ORDER_STEP } from './model.js';
 import {
@@ -38,6 +39,7 @@ export const SyncOutcome = {
     LOCKED: 'locked',
     BACKOFF: 'backoff',
     WRONG_PASSPHRASE: 'wrong-passphrase',
+    ROTATED: 'rotated',
     FAILED: 'failed'
 };
 
@@ -100,8 +102,6 @@ export async function push() {
     const { texts } = await loadState();
     const byId = new Map(texts.map(entry => [entry.id, entry]));
 
-    // An id can be queued for an entry that no longer exists locally (imported
-    // then wiped, say). Drop those rather than failing the whole flush.
     // An id can be queued for an entry that no longer exists locally (imported
     // then wiped, say) — drop those rather than failing the whole flush. An
     // undecryptable placeholder must never be pushed at all: it holds no real
@@ -549,4 +549,63 @@ export async function gcTombstones() {
     }
 
     return { outcome: 'gc-complete', removed: toDelete.length };
+}
+
+// ---- passphrase rotation ---------------------------------------------------
+
+/**
+ * Change the passphrase: derive a new key, rotate the account's kdf/verifier,
+ * and re-encrypt every entry under the new key.
+ *
+ * Local storage is already plaintext — only the server copy is encrypted —
+ * so "re-encryption" here just means bumping every entry's clock and letting
+ * the normal push pipeline pick them up under whatever key is currently
+ * cached, which by the time push() runs is the new one. That reuse matters:
+ * it's the same batching, backoff and undecryptable-placeholder guard as
+ * every other push, rather than a second, less-tested code path for what is
+ * otherwise the highest-blast-radius operation in the app.
+ *
+ * Requires the device to already be unlocked. Not because the old key is
+ * needed — it isn't — but because unlocked is the only proof available that
+ * whoever is doing this actually knows the current passphrase, rather than
+ * merely being signed into the Google account.
+ *
+ * @param existingAccount the current users/{uid} doc, from getAccount()
+ * @param lockPolicy the auto-lock policy to re-cache the new key under
+ */
+export async function rotatePassphrase(newPassphrase, existingAccount, lockPolicy) {
+    const user = await currentUser();
+    if (!user) return { outcome: SyncOutcome.SIGNED_OUT };
+
+    const oldKey = await getCachedKey(user.uid);
+    if (!oldKey) return { outcome: SyncOutcome.LOCKED };
+
+    const { key: newKey, kdf, verifier } = await createKdfSetup(newPassphrase);
+
+    // Account doc first: if this succeeds but the entry re-push below fails
+    // partway (network drop, tab closed), the device still holds the correct
+    // new key and can simply be pushed again later — nothing is stuck between
+    // two inconsistent halves of a single operation.
+    await rotateAccount(user.uid, { kdf, verifier }, existingAccount);
+    await cacheKey(newKey, user.uid, lockPolicy);
+
+    const { texts, sortMode } = await loadState();
+    const now = Date.now();
+    const dirtyIds = [];
+
+    for (const entry of texts) {
+        // A placeholder holds no real content on this device — see the same
+        // guard in push(). Its ciphertext on the server is already under
+        // whatever key produced it; this device re-encrypting "null" over it
+        // would destroy content another device can still read.
+        if (entry.undecryptable) continue;
+        entry.updatedAt = now;
+        dirtyIds.push(entry.id);
+    }
+
+    await saveState({ texts, sortMode, dirtyIds });
+
+    const pushResult = await push();
+
+    return { outcome: SyncOutcome.ROTATED, count: dirtyIds.length, pushResult };
 }

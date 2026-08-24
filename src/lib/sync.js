@@ -102,8 +102,16 @@ export async function push() {
 
     // An id can be queued for an entry that no longer exists locally (imported
     // then wiped, say). Drop those rather than failing the whole flush.
-    const pushable = pendingIds.filter(id => byId.has(id));
-    const orphaned = pendingIds.filter(id => !byId.has(id));
+    // An id can be queued for an entry that no longer exists locally (imported
+    // then wiped, say) — drop those rather than failing the whole flush. An
+    // undecryptable placeholder must never be pushed at all: it holds no real
+    // content (`text: null`), and encrypting that over a document would
+    // destroy the real content that other devices can read fine. This should
+    // never happen through the UI (copy/edit/delete are all refused on these
+    // rows), but the check belongs here too — it's the one place that can
+    // guarantee it regardless of how an id ended up queued.
+    const pushable = pendingIds.filter(id => byId.has(id) && !byId.get(id).undecryptable);
+    const orphaned = pendingIds.filter(id => !byId.has(id) || byId.get(id).undecryptable);
 
     const db = getDb();
     const entriesRef = collection(db, 'users', user.uid, 'entries');

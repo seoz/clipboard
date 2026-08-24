@@ -194,6 +194,19 @@ describe('push payload', () => {
         expect(await queue.getPending()).toEqual([]);   // ghost dropped, not retried forever
     });
 
+    it('refuses to push an undecryptable placeholder, even if it is queued', async () => {
+        // This is the hazard: text is null on a placeholder. If this were
+        // ever pushed, "null" would be encrypted and overwrite the real
+        // content that other devices can still read fine.
+        texts = [entry('good'), entry('broken', { text: null, undecryptable: true })];
+        await queue.markDirty(['good', 'broken']);
+
+        const result = await push();
+        expect(result.count).toBe(1);
+        expect(commits[0].map(w => w.id)).toEqual(['good']);
+        expect(await queue.getPending()).toEqual([]);   // not retried forever either
+    });
+
     it('splits work across batches at the Firestore limit', async () => {
         texts = Array.from({ length: 501 }, (_, i) => entry(`e${i}`));
         await queue.markDirty(texts.map(t => t.id));

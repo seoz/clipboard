@@ -8,7 +8,7 @@
  * instantly instead of after a hundred failed entry decryptions.
  */
 
-import { doc, getDoc, setDoc } from 'firebase/firestore/lite';
+import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore/lite';
 import { getDb } from './firebase.js';
 import { SCHEMA_VERSION } from './model.js';
 
@@ -50,4 +50,9 @@ export async function rotateAccount(uid, { kdf, verifier }, existing) {
         createdAt: existing.createdAt,
         updatedAt: Math.max(Date.now(), existing.updatedAt + 1)
     });
+}
+
+/** Danger zone: forget this account's kdf/verifier entirely. */
+export async function deleteAccount(uid) {
+    await deleteDoc(userRef(uid));
 }

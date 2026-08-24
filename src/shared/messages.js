@@ -7,5 +7,6 @@ export const MSG = {
     VERIFY_SYNC: 'VERIFY_SYNC',    // read the server back and compare with local
     PREVIEW_MERGE: 'PREVIEW_MERGE', // build a first-merge plan without applying it
     APPLY_MERGE: 'APPLY_MERGE',     // commit a plan the user has already seen
-    ROTATE_PASSPHRASE: 'ROTATE_PASSPHRASE' // re-encrypt everything under a new passphrase
+    ROTATE_PASSPHRASE: 'ROTATE_PASSPHRASE', // re-encrypt everything under a new passphrase
+    DELETE_CLOUD_DATA: 'DELETE_CLOUD_DATA'  // danger zone: wipe the server copy
 };

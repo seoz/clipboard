@@ -99,6 +99,7 @@ async function renderUser(user) {
     el('signedIn').hidden = !user;
     el('signedOut').hidden = Boolean(user);
     el('diagnosticsCard').hidden = !user;
+    el('dangerCard').hidden = !user;
 
     activeUid = user?.uid ?? null;
     account = null;
@@ -414,6 +415,44 @@ async function handleConfirmRotate() {
     }
 }
 
+// ---- danger zone: delete all cloud data ------------------------------------
+
+function showDeleteConfirm() {
+    el('deleteConfirm').hidden = false;
+    el('deleteConfirmInput').value = '';
+    el('confirmDeleteBtn').disabled = true;
+    el('deleteConfirmInput').focus();
+}
+
+function hideDeleteConfirm() {
+    el('deleteConfirm').hidden = true;
+}
+
+async function handleConfirmDelete() {
+    const button = el('confirmDeleteBtn');
+    button.disabled = true;
+    el('dangerStatus').textContent = 'Deleting…';
+    el('dangerStatus').dataset.kind = '';
+
+    try {
+        const result = await chrome.runtime.sendMessage({ type: MSG.DELETE_CLOUD_DATA });
+        if (result.outcome !== 'deleted') throw new Error(result.message || 'Delete failed');
+
+        account = null;
+        hideDeleteConfirm();
+        await renderEncryption({ uid: activeUid });
+        el('dangerStatus').textContent =
+            `Deleted ${result.count} snippet${result.count === 1 ? '' : 's'} from the server. ` +
+            'Your local snippets are untouched.';
+        el('dangerStatus').dataset.kind = 'ok';
+    } catch (error) {
+        console.error('Delete-all failed:', error);
+        el('dangerStatus').textContent = describe(error);
+        el('dangerStatus').dataset.kind = 'error';
+        button.disabled = false;
+    }
+}
+
 /**
  * Read the server back and compare. Rendered as a summary rather than raw JSON,
  * because the useful answer is "yes, and here's the count" or "no, and here's
@@ -543,6 +582,13 @@ async function main() {
     el('confirmRotateBtn').addEventListener('click', handleConfirmRotate);
     ['rotatePassphraseNew', 'rotatePassphraseConfirm', 'rotateAckLoss'].forEach(id =>
         el(id).addEventListener('input', refreshRotateButton));
+
+    el('deleteCloudDataBtn').addEventListener('click', showDeleteConfirm);
+    el('cancelDeleteBtn').addEventListener('click', hideDeleteConfirm);
+    el('deleteConfirmInput').addEventListener('input', e => {
+        el('confirmDeleteBtn').disabled = e.target.value !== 'DELETE';
+    });
+    el('confirmDeleteBtn').addEventListener('click', handleConfirmDelete);
 
     renderUser(await currentUser());
     watchAuth(renderUser);

@@ -30,7 +30,10 @@ vi.mock('firebase/firestore/lite', () => ({
     query: (ref, ...constraints) => ({ __constraints: constraints }),
     where: (field, op, value) => ({ type: 'where', field, op, value }),
     orderBy: field => ({ type: 'orderBy', field }),
-    deleteDoc: async ref => { remote.delete(ref.id); },
+    deleteDoc: async ref => {
+        if (ref.kind === 'account') accountDocs.delete(ref.id);
+        else remote.delete(ref.id);
+    },
     getDocs: async target => {
         let entries = [...remote.entries()];
         for (const c of target.__constraints ?? []) {
@@ -50,12 +53,14 @@ vi.mock('firebase/firestore/lite', () => ({
     writeBatch: () => {
         const writes = [];
         return {
-            set: (ref, data) => writes.push({ id: ref.id, data }),
+            set: (ref, data) => writes.push({ type: 'set', id: ref.id, data }),
+            delete: ref => writes.push({ type: 'delete', id: ref.id }),
             commit: async () => {
                 if (commitError) throw commitError;
                 if (failCommitAt === commits.length) {
                     throw Object.assign(new Error('boom'), { code: 'unavailable' });
                 }
+                writes.forEach(w => { if (w.type === 'delete') remote.delete(w.id); });
                 commits.push(writes);
             }
         };
@@ -69,7 +74,8 @@ vi.mock('../src/lib/auth.js', () => ({ currentUser: async () => user }));
 let key = 'fake-key';
 vi.mock('../src/lib/keycache.js', () => ({
     getCachedKey: async () => key,
-    cacheKey: async newKey => { key = newKey; }
+    cacheKey: async newKey => { key = newKey; },
+    lockNow: async () => { key = null; }
 }));
 
 vi.mock('../src/lib/crypto.js', () => ({
@@ -114,7 +120,7 @@ vi.mock('../src/lib/store.js', () => ({
 
 const {
     push, pull, verify, previewFirstMerge, applyFirstMerge, gcTombstones,
-    rotatePassphrase, SyncOutcome
+    rotatePassphrase, deleteAllCloudData, SyncOutcome
 } = await import('../src/lib/sync.js');
 const queue = await import('../src/lib/queue.js');
 
@@ -823,5 +829,89 @@ describe('rotatePassphrase', () => {
         // the same (already-rotated) key rather than needing to rotate again.
         expect(accountDocs.get('uid-1').kdf.salt).toBe('SALT-FOR-brand-new-passphrase');
         expect(await queue.getPending()).toEqual(['a']);   // preserved for retry
+    });
+});
+
+describe('deleteAllCloudData', () => {
+    it('refuses signed out', async () => {
+        user = null;
+        expect((await deleteAllCloudData()).outcome).toBe(SyncOutcome.SIGNED_OUT);
+    });
+
+    it('deletes every server entry and the account doc', async () => {
+        sealRemote('a', 'x', 0);
+        sealRemote('b', 'y', 0);
+        accountDocs.set('uid-1', { kdf: {}, verifier: {}, createdAt: 1, updatedAt: 2 });
+
+        const result = await deleteAllCloudData();
+
+        expect(result.outcome).toBe('deleted');
+        expect(result.count).toBe(2);
+        expect(remote.size).toBe(0);
+        expect(accountDocs.has('uid-1')).toBe(false);
+    });
+
+    it('does not touch local snippets — only the cloud copy is deleted', async () => {
+        texts = [entry('a'), entry('b')];
+        sealRemote('a', 'x', 0);
+
+        await deleteAllCloudData();
+
+        expect(texts).toHaveLength(2);   // untouched
+        expect(savedStateCalls).toHaveLength(0);
+    });
+
+    it('resets local sync bookkeeping so a future setup starts clean', async () => {
+        await queue.setLastPullAt(9999);
+        await queue.recordFailure();
+        await queue.setLastError({ source: 'push', code: 'x', fatal: false });
+        await queue.markDirty(['stale-id']);
+
+        await deleteAllCloudData();
+
+        expect(await queue.getLastPullAt()).toBe(0);
+        expect(await queue.inBackoff()).toBe(false);
+        expect(await queue.getLastError()).toBeNull();
+        expect(await queue.getPending()).toEqual([]);
+    });
+
+    it('handles more entries than one Firestore batch', async () => {
+        for (let i = 0; i < 501; i++) sealRemote(`e${i}`, 'x', 0);
+        const result = await deleteAllCloudData();
+        expect(result.count).toBe(501);
+        expect(remote.size).toBe(0);
+    });
+
+    it('tombstones a live entry before removing it — the rules require this', async () => {
+        // Firestore only allows a hard delete of an already-tombstoned
+        // document (see firestore.rules). A live entry must be visibly
+        // tombstoned in its own write before the delete pass, not deleted
+        // directly — this test pins that two-step shape.
+        sealRemote('live', 'x', 0, { deletedAt: null, updatedAt: 1000 });
+
+        await deleteAllCloudData();
+
+        const setWrite = commits.flat().find(w => w.type === 'set' && w.id === 'live');
+        const deleteWrite = commits.flat().find(w => w.type === 'delete' && w.id === 'live');
+        expect(setWrite).toBeTruthy();
+        expect(setWrite.data.deletedAt).not.toBeNull();
+        expect(setWrite.data.updatedAt).toBeGreaterThan(1000);
+        expect(deleteWrite).toBeTruthy();
+
+        // And the set had to land before the delete, not the other way round.
+        const setBatchIndex = commits.findIndex(batch => batch.includes(setWrite));
+        const deleteBatchIndex = commits.findIndex(batch => batch.includes(deleteWrite));
+        expect(setBatchIndex).toBeLessThan(deleteBatchIndex);
+    });
+
+    it('does not re-tombstone an entry that is already deleted', async () => {
+        sealRemote('gone', 'x', 0, { deletedAt: 500, updatedAt: 500 });
+
+        await deleteAllCloudData();
+
+        // Only the delete pass touches it — no set/update at all.
+        const touches = commits.flat().filter(w => w.id === 'gone');
+        expect(touches).toHaveLength(1);
+        expect(touches[0].type).toBe('delete');
     });
 });

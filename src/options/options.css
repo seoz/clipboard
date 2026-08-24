@@ -227,3 +227,30 @@ button:disabled {
 .verify-problem {
     color: var(--danger);
 }
+
+.danger-btn {
+    font: inherit;
+    font-weight: 500;
+    padding: 9px 16px;
+    border-radius: 7px;
+    cursor: pointer;
+    background: #fff;
+    border: 1px solid var(--danger);
+    color: var(--danger);
+}
+
+.danger-btn:hover:not(:disabled) {
+    background: var(--danger);
+    color: #fff;
+}
+
+#deleteConfirmInput {
+    font: inherit;
+    width: 100%;
+    max-width: 200px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    margin-bottom: 10px;
+    display: block;
+}

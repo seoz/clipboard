@@ -138,6 +138,18 @@ when('firestore rules', () => {
         });
     });
 
+    describe('account deletion (danger zone)', () => {
+        it('lets the owner delete their own account doc', async () => {
+            await seed(['users', ALICE], validAccount());
+            await assertSucceeds(deleteDoc(accountRef(asAlice())));
+        });
+
+        it('refuses another user deleting it', async () => {
+            await seed(['users', ALICE], validAccount());
+            await assertFails(deleteDoc(accountRef(asBob(), ALICE)));
+        });
+    });
+
     describe('account shape', () => {
         it('refuses an unexpected field', async () => {
             await assertFails(setDoc(accountRef(asAlice()),

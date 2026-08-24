@@ -179,6 +179,33 @@
             <div id="verifySummary" hidden></div>
             <pre class="diagnostics-output" id="workerOutput" hidden></pre>
         </section>
+
+        <section class="card" id="dangerCard" hidden>
+            <h2>Danger zone</h2>
+            <p class="muted">
+                Removes every snippet from the server and forgets your
+                passphrase setup. Your snippets on this device are not
+                touched — only the cloud copy is deleted. Any other device
+                that was signed in stops syncing until you set a new
+                passphrase there too.
+            </p>
+            <button id="deleteCloudDataBtn" class="danger-btn">
+                Delete all cloud data
+            </button>
+            <div id="deleteConfirm" hidden>
+                <p class="muted">
+                    Type <strong>DELETE</strong> to confirm. This can't be undone.
+                </p>
+                <input type="text" id="deleteConfirmInput" autocomplete="off">
+                <div class="button-row">
+                    <button id="confirmDeleteBtn" class="danger-btn" disabled>
+                        Permanently delete
+                    </button>
+                    <button id="cancelDeleteBtn" class="secondary-btn">Cancel</button>
+                </div>
+            </div>
+            <p class="status" id="dangerStatus" role="status" aria-live="polite"></p>
+        </section>
     </main>
 
     <script type="module" src="options.js"></script>

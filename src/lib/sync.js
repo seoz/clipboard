@@ -12,14 +12,14 @@ import {
 } from 'firebase/firestore/lite';
 import { getDb } from './firebase.js';
 import { currentUser } from './auth.js';
-import { getCachedKey, cacheKey } from './keycache.js';
+import { getCachedKey, cacheKey, lockNow } from './keycache.js';
 import { encryptJson, decryptJson, createKdfSetup } from './crypto.js';
-import { rotateAccount } from './account.js';
+import { rotateAccount, deleteAccount } from './account.js';
 import { loadState, saveState } from './store.js';
 import { isLive, dedupKey, ORDER_STEP } from './model.js';
 import {
     getPending, clearPending, recordFailure, clearBackoff, inBackoff,
-    getLastPullAt, setLastPullAt
+    getLastPullAt, setLastPullAt, clearLastError
 } from './queue.js';
 
 /** Record schema version for a Firestore entry document. */
@@ -608,4 +608,67 @@ export async function rotatePassphrase(newPassphrase, existingAccount, lockPolic
     const pushResult = await push();
 
     return { outcome: SyncOutcome.ROTATED, count: dirtyIds.length, pushResult };
+}
+
+
+// ---- danger zone -----------------------------------------------------------
+
+/**
+ * Delete every entry from the server and forget the account's kdf/verifier.
+ *
+ * Deliberately does NOT touch local storage: this removes the cloud copy,
+ * not the user's snippets. It also does not sign the user out of Google —
+ * only sync/encryption is being reset, not the account itself. Any other
+ * device still holding the old key simply stops being able to sync (its next
+ * push will hit a missing account doc) until someone sets a new passphrase.
+ */
+export async function deleteAllCloudData() {
+    const user = await currentUser();
+    if (!user) return { outcome: SyncOutcome.SIGNED_OUT };
+
+    const entriesRef = collection(getDb(), 'users', user.uid, 'entries');
+    const snapshot = await getDocs(entriesRef);
+    const now = Date.now();
+
+    // The security rules only permit a hard delete of an entry that is
+    // already tombstoned — the same path every individual delete in the app
+    // goes through, so nothing here bypasses it. A live entry is tombstoned
+    // first, in its own batch, before the second pass removes it for real.
+    for (let i = 0; i < snapshot.docs.length; i += BATCH_LIMIT) {
+        const live = snapshot.docs.slice(i, i + BATCH_LIMIT)
+            .filter(docSnap => docSnap.data().deletedAt == null);
+        if (live.length === 0) continue;
+
+        const batch = writeBatch(getDb());
+        live.forEach(docSnap => {
+            const data = docSnap.data();
+            batch.set(doc(entriesRef, docSnap.id), {
+                ...data,
+                deletedAt: now,
+                updatedAt: Math.max(now, data.updatedAt + 1)
+            });
+        });
+        await batch.commit();
+    }
+
+    for (let i = 0; i < snapshot.docs.length; i += BATCH_LIMIT) {
+        const batch = writeBatch(getDb());
+        snapshot.docs.slice(i, i + BATCH_LIMIT).forEach(docSnap => {
+            batch.delete(doc(entriesRef, docSnap.id));
+        });
+        await batch.commit();
+    }
+
+    await deleteAccount(user.uid);
+
+    // Reset every piece of local sync bookkeeping, so a future "set passphrase"
+    // starts clean rather than half-remembering a cursor or a stale error from
+    // before the reset.
+    await lockNow();
+    await clearPending(await getPending());
+    await clearBackoff();
+    await clearLastError();
+    await setLastPullAt(0);
+
+    return { outcome: 'deleted', count: snapshot.docs.length };
 }

@@ -19,7 +19,7 @@ import { purgeIfSessionScoped, getCachedKey } from '../lib/keycache.js';
 import {
     push, pull, verify, gcTombstones,
     previewFirstMerge, applyFirstMerge,
-    rotatePassphrase, SyncOutcome
+    rotatePassphrase, deleteAllCloudData, SyncOutcome
 } from '../lib/sync.js';
 import { getPending, getLastError, setLastError, clearLastError } from '../lib/queue.js';
 import { MSG } from '../shared/messages.js';
@@ -212,6 +212,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         // re-push can't race the worker's own alarm-driven push/pull over the
         // same chrome.storage.local queue.
         rotatePassphrase(message.newPassphrase, message.account, message.lockPolicy)
+            .then(async result => { await updateBadge(); return result; })
+            .then(sendResponse)
+            .catch(error => sendResponse({ outcome: 'error', message: error.message }));
+        return true;
+    }
+
+    if (message?.type === MSG.DELETE_CLOUD_DATA) {
+        deleteAllCloudData()
             .then(async result => { await updateBadge(); return result; })
             .then(sendResponse)
             .catch(error => sendResponse({ outcome: 'error', message: error.message }));

@@ -553,9 +553,10 @@ async function main() {
     if (!isConfigured()) {
         el('setupCard').hidden = false;
         el('setupMessage').textContent =
-            'Firebase config is missing from this build. Copy .env.example to ' +
-            '.env.local, fill in your project values, then run `npm run build` ' +
-            'and reload the extension.';
+            'Firebase config is missing from this build. This should not happen ' +
+            'against a normal checkout — .env is committed with working values. ' +
+            'Check it exists and is intact (or that an .env.local override sets ' +
+            'every value), then run `npm run build` and reload the extension.';
         return;
     }
 

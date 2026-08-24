@@ -16,8 +16,11 @@ A Chrome extension that allows you to store and manage multiple texts with easy 
 
 ## Installation
 
-QuickPaste is now built from source before loading, so the folder you load
-into Chrome is `dist/`, not the repository root.
+QuickPaste is built from source before loading, so the folder you load into
+Chrome is `dist/`, not the repository root. There's no separate config step —
+the build config is committed (it's all public identifiers, not secrets; see
+[DESIGN.md](DESIGN.md) §8 for why), so every device that builds this repo
+produces an identical, already-configured extension.
 
 1. Download or clone this repository
 2. Install [Node.js](https://nodejs.org/) 18 or newer if you don't have it
@@ -36,6 +39,17 @@ into Chrome is `dist/`, not the repository root.
 
 While making changes, `npm run dev` rebuilds automatically on save — click the
 reload icon on the extension's card in `chrome://extensions/` to pick them up.
+
+### Using it on more than one device
+
+Repeat steps 1–7 above on each device — same repo, same build, no extra setup.
+Because the signing key and Firebase config are committed, every device gets
+the exact same extension ID and talks to the exact same project automatically,
+so Google sign-in and sync work immediately without registering anything twice.
+
+This project doesn't (yet) publish to the Chrome Web Store, so there's no
+auto-update across devices — pull the latest changes and rebuild on each one
+when you want to pick up updates.
 
 ## Usage
 

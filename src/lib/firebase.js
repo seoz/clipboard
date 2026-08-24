@@ -29,9 +29,12 @@ function init() {
     if (cached) return cached;
 
     if (!isConfigured()) {
+        // Should not happen against a normal clone — .env is committed with
+        // working values. This means .env is missing, corrupted, or an
+        // .env.local override is present but incomplete.
         throw new Error(
-            'Firebase is not configured. Copy .env.example to .env.local, fill in ' +
-            'the project values, and rebuild.'
+            'Firebase is not configured. Check .env exists and is intact, or ' +
+            'if you have an .env.local override, that it sets every value. Then rebuild.'
         );
     }
 

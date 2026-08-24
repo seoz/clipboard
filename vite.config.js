@@ -34,7 +34,9 @@ function manifestPlaceholders(env) {
             if (!env.EXT_PUBLIC_KEY || !env.OAUTH_CLIENT_ID) {
                 this.warn(
                     'Building without EXT_PUBLIC_KEY / OAUTH_CLIENT_ID — Google ' +
-                    'sign-in is disabled in this build. See .env.example.'
+                    'sign-in is disabled in this build. This should not happen ' +
+                    'against a normal checkout, since .env is committed with ' +
+                    'working values — check .env exists and is intact.'
                 );
             }
 

@@ -7,8 +7,14 @@
 # extension ID, so the ID has to be pinned via the manifest "key" field before
 # sign-in can work.
 #
-# Writes quickpaste.pem (gitignored, SECRET) and prints the two public values
-# that go into .env.local.
+# This is a ONE-TIME step for the whole project, not something to run per
+# device: EXT_PUBLIC_KEY is committed in .env, so every device that builds
+# this repo already gets the same pinned ID. Only run this again if you are
+# deliberately starting a brand-new project (which requires re-registering a
+# new OAuth client too) or intentionally rotating the ID.
+#
+# Writes quickpaste.pem (gitignored, SECRET) and prints the public value that
+# goes into .env (or .env.local, if you're pointing at your own project).
 #
 set -euo pipefail
 
@@ -40,7 +46,9 @@ Extension ID (register this in Google Cloud Console):
 
     $EXT_ID
 
-Add to .env.local:
+Put this in .env (commit it — it's the public half, safe to share) if
+starting a new project, or in .env.local if you're pointing at your own
+Firebase project without changing the shared one:
 
     EXT_PUBLIC_KEY=$EXT_PUBLIC_KEY
 

@@ -111,7 +111,7 @@ The `maxTexts` cap is now a getter returning 20 while signed out, and will retur
 - **XSS via saved text.** User text is interpolated into `innerHTML`, guarded by `escapeHtml()` (a `textContent` → `innerHTML` round-trip through a detached `<div>`). Note that this escapes `&<>` but not quotes, so it is safe for element bodies and *not* sufficient for attribute values — which is precisely why ids are pattern-validated at §2 rather than escaped at render time.
 - **Permission scope.** `storage` and `clipboardWrite` only — no `host_permissions`, no `activeTab`, no `content_scripts`. The extension cannot read or modify page content on any site. §8 will need to widen this, and that widening should be reviewed on its own terms.
 - **Import as an attack surface.** Import uses `JSON.parse` (no `eval`) and type-checks every field. A malicious file can at most inject text that is HTML-escaped at render time, or an id that is rejected by `isValidId()`.
-- **No secrets in this codebase.** There is still no API key, network call, or remote service anywhere in the extension. §8 changes this, and the distinction it draws between *public identifiers* and *secrets* will need to be documented here when it lands.
+- **Config vs. secrets, now that §8 has landed.** `.env` is committed and holds the Firebase web config, the OAuth client id, and the extension's public signing key — see §8.7 for why none of that is a credential.
 
 ## 7. Testing
 
@@ -185,6 +185,20 @@ A device idle more than 30 days falls back from the delta query to a full read. 
 ### 8.6 Sync status (built)
 
 The account button in the popup header reflects one of six states, computed by `syncStatusView()` — a pure function, tested independently of the DOM it renders into. Priority order matters: **locked** outranks everything else, since it's the only state with an unambiguous fix (unlock). A **fatal** error (`permission-denied`/`unauthenticated`) is reported distinctly from a **quota** error, because their fixes differ — one needs signing in again, the other needs waiting or freeing space. **Offline with changes pending** is deliberately not styled as an error; it is the expected, recoverable shape of being offline, and raising an alarm where none is warranted is its own kind of bug. The worker records a single "last problem" slot after every push/pull cycle, read locally (`chrome.storage` and IndexedDB, no network) so the popup can check it on every open without adding latency.
+
+### 8.7 Configuration and what's actually secret
+
+`.env` is committed to the repository. Every value in it is a public identifier, not a credential:
+
+- **Firebase web config** (`apiKey`, `authDomain`, `projectId`, …). Google's own documentation is explicit: *"API keys restricted to Firebase services do not need to be treated as secrets, and it's safe to include them in your code or configuration files."* ([firebase.google.com/docs/projects/api-keys](https://firebase.google.com/docs/projects/api-keys)). The key identifies the *project*; it authorises nothing by itself. That's what makes §8.3's security rules load-bearing rather than decorative — they are, along with Firebase Auth and the end-to-end encryption in §8.2, the entire access-control story. The one condition worth actually checking rather than assuming: the key must be restricted to Firebase-only APIs in Cloud Console (auto-provisioned Firebase keys are, by default, since May 2024).
+- **OAuth client id** (`Chrome Extension` type). This client type issues no client secret at all — Google's platform treats it as a public client, since a secret embedded in a distributed extension could never actually be kept secret.
+- **`EXT_PUBLIC_KEY`** — the public half of the RSA key that pins the extension's id (§8.1). Publishing an extension always exposes this; every installed extension's `manifest.json` carries it in the clear.
+
+None of this is newly exposed by committing it: all four values ship inside the built extension regardless, which is a zip anyone can unpack. Committing them changes nothing about who can see them — it just means a fresh checkout builds immediately, with the exact same extension id every time, rather than requiring per-device setup that used to include manually regenerating a signing key.
+
+**What is genuinely secret, and why it's the only thing gitignored:** `quickpaste.pem`, the *private* half of that signing key, written once by `scripts/generate-key.sh`. It never leaves the machine that generated it, is never read by the build (only `EXT_PUBLIC_KEY`, its public derivative, is), and is the one artifact whose loss or leak would actually matter — losing it means a future rebuild can no longer reproduce the pinned extension id; leaking it would let someone else produce a manifest claiming the same id.
+
+`.env.local`, if present, overrides `.env` — useful for pointing a checkout at a different Firebase project without touching the committed defaults. It stays gitignored not because its contents would be more sensitive, but because it's inherently per-developer.
 
 ## 9. Known limitations / possible follow-ups
 

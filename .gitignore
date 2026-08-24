@@ -1,6 +1,9 @@
 node_modules/
 dist/
-.env
+
+# .env is committed on purpose — see its own header comment. Only *.local
+# overrides (personal, e.g. pointing at your own Firebase project) and the
+# actual private key stay out of git.
 .env.local
 .env.*.local
 *.pem
@@ -10,3 +13,6 @@ firebase-debug.log
 firestore-debug.log
 ui-debug.log
 .DS_Store
+*.swp
+*.swo
+*~

@@ -590,3 +590,18 @@ body {
 #syncBtn[data-state="locked"] .sync-dot {
     background: #f0a500;
 }
+
+/* ---- undecryptable placeholder ---- */
+.text-item.undecryptable {
+    cursor: default;
+    opacity: 0.7;
+}
+
+.text-item.undecryptable:hover {
+    background: none;
+}
+
+.text-content-broken {
+    color: #b45309;
+    font-style: italic;
+}

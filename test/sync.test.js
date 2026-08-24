@@ -87,7 +87,8 @@ const queue = await import('../src/lib/queue.js');
 
 const entry = (id, over = {}) => ({
     id, text: `text ${id}`, frequency: 0,
-    timestamp: 1000, updatedAt: 2000, order: 0, deletedAt: null, ...over
+    timestamp: 1000, updatedAt: 2000, order: 0, deletedAt: null,
+    undecryptable: false, ...over
 });
 
 function fakeStorage() {
@@ -457,6 +458,75 @@ describe('pull', () => {
         const result = await pull();
         expect(result.decryptFailures).toEqual(['bad']);
         expect(texts.find(t => t.id === 'a').text).toBe('fine');
+    });
+
+    it('materialises a visible placeholder for a brand-new entry that fails to decrypt', async () => {
+        texts = [];
+        await queue.setLastPullAt(500);
+        remote.set('mystery', {
+            v: 1, iv: 'IV',
+            ct: Buffer.from(JSON.stringify({ value: { text: 'x' }, aad: 'wrong-id' })).toString('base64'),
+            order: 0, createdAt: 1000, updatedAt: 2000, deletedAt: null
+        });
+
+        await pull();
+        // Without this, an entry this device can never decrypt would simply
+        // never appear — indistinguishable from it never having existed.
+        expect(texts).toEqual([expect.objectContaining({
+            id: 'mystery', text: null, undecryptable: true
+        })]);
+    });
+
+    it('does not overwrite an existing local entry with a placeholder on decrypt failure', async () => {
+        // The entry is known-good locally; a remote version that fails to
+        // decrypt must not clobber the last content this device could read.
+        texts = [entry('a', { text: 'still readable here', updatedAt: 1000 })];
+        await queue.setLastPullAt(500);
+        remote.set('a', {
+            v: 1, iv: 'IV',
+            ct: Buffer.from(JSON.stringify({ value: { text: 'x' }, aad: 'wrong-id' })).toString('base64'),
+            order: 0, createdAt: 1000, updatedAt: 9000, deletedAt: null
+        });
+
+        await pull();
+        expect(texts).toEqual([expect.objectContaining({
+            id: 'a', text: 'still readable here', undecryptable: false
+        })]);
+    });
+
+    it('does NOT advance the pull cursor past a document it could not decrypt', async () => {
+        // This is the bug: advancing the cursor past a failure would mean the
+        // delta query `updatedAt > cursor` never returns that document again,
+        // permanently hiding it even once the correct key is available.
+        texts = [];
+        await queue.setLastPullAt(500);
+        remote.set('bad', {
+            v: 1, iv: 'IV',
+            ct: Buffer.from(JSON.stringify({ value: { text: 'x' }, aad: 'wrong-id' })).toString('base64'),
+            order: 0, createdAt: 1000, updatedAt: 9000, deletedAt: null
+        });
+
+        await pull();
+        expect(await queue.getLastPullAt()).toBe(500);   // unchanged
+
+        // A second pull with the SAME (still wrong) key must retry, not skip.
+        await pull();
+        expect(texts.filter(t => t.id === 'bad')).toHaveLength(1);   // not duplicated
+    });
+
+    it('still advances the cursor past documents it could decrypt in the same batch', async () => {
+        texts = [];
+        await queue.setLastPullAt(500);
+        sealRemote('good', 'readable', 0, { updatedAt: 3000 });
+        remote.set('bad', {
+            v: 1, iv: 'IV',
+            ct: Buffer.from(JSON.stringify({ value: { text: 'x' }, aad: 'wrong-id' })).toString('base64'),
+            order: 0, createdAt: 1000, updatedAt: 9000, deletedAt: null
+        });
+
+        await pull();
+        // Held back by 'bad', but not stuck at the original cursor either.
+        expect(await queue.getLastPullAt()).toBe(3000);
     });
 
     it('advances the pull cursor to the newest updatedAt actually seen', async () => {

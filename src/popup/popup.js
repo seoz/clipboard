@@ -114,7 +114,10 @@ class TextManager {
         const ordered = this.orderedLive();
         if (!this.searchTerm) return ordered;
         const term = this.searchTerm.toLowerCase();
-        return ordered.filter(entry => entry.text.toLowerCase().includes(term));
+        // An undecryptable entry has no text to search — keep it visible
+        // rather than let a search term hide it from view entirely.
+        return ordered.filter(entry =>
+            entry.undecryptable || entry.text.toLowerCase().includes(term));
     }
 
     byId(id) {
@@ -274,7 +277,7 @@ class TextManager {
                 return;
             }
 
-            if (!e.target.closest('.drag-handle')) {
+            if (!e.target.closest('.drag-handle') && !row.classList.contains('undecryptable')) {
                 this.copyToClipboard(row.dataset.id);
             }
         });
@@ -357,12 +360,17 @@ class TextManager {
     // ---- mutations -----------------------------------------------------
 
     openModal(editId = null) {
+        const entry = editId ? this.byId(editId) : null;
+        // Nothing to edit: there is no plaintext on this device to prefill,
+        // and saving would silently overwrite content this device can't read
+        // but another device still can.
+        if (editId && (!entry || entry.undecryptable)) return;
+
         this.editingId = editId;
         const modal = document.getElementById('textModal');
         const textInput = document.getElementById('textInput');
         const modalTitle = document.getElementById('modalTitle');
 
-        const entry = editId ? this.byId(editId) : null;
         modalTitle.textContent = entry ? 'Edit Text' : 'Add New Text';
         textInput.value = entry ? entry.text : '';
 
@@ -413,7 +421,15 @@ class TextManager {
      */
     async deleteText(id) {
         const entry = this.byId(id);
-        if (!entry || !confirm('Are you sure you want to delete this text?')) return;
+        if (!entry) return;
+        // Deleting something this device can't read would tombstone it for
+        // every device, including ones that decrypt it fine — a wrong-key
+        // device has no business destroying data it can't even verify.
+        if (entry.undecryptable) {
+            this.showToast("Can't delete — this device couldn't read it.", 'error');
+            return;
+        }
+        if (!confirm('Are you sure you want to delete this text?')) return;
 
         touch(entry, { deletedAt: Date.now() });
         this.selectedIndex = -1;
@@ -464,7 +480,7 @@ class TextManager {
 
     async copyToClipboard(id) {
         const entry = this.byId(id);
-        if (!entry) return;
+        if (!entry || entry.undecryptable) return;
 
         let copied;
         try {
@@ -535,7 +551,19 @@ class TextManager {
         const draggable = this.sortMode === 'manual';
         const dragHandleStyle = draggable ? '' : 'visibility: hidden; pointer-events: none;';
 
-        container.innerHTML = this.rendered.map(entry => `
+        container.innerHTML = this.rendered.map(entry => entry.undecryptable
+            ? `
+            <div class="text-item undecryptable" data-id="${this.escapeHtml(entry.id)}"
+                 title="This device couldn't decrypt this snippet. It's safe on the server — try unlocking with the correct passphrase.">
+                <div class="drag-handle" style="visibility: hidden;">⋮⋮</div>
+                <div class="text-content-wrapper">
+                    <div class="text-body-row">
+                        <div class="text-content text-content-broken">⚠️ Could not decrypt this snippet</div>
+                    </div>
+                </div>
+            </div>
+        `
+            : `
             <div class="text-item" data-id="${this.escapeHtml(entry.id)}"${draggable ? ' draggable="true"' : ''}>
                 <div class="drag-handle" title="Drag to reorder" style="${dragHandleStyle}">⋮⋮</div>
                 <div class="text-content-wrapper">

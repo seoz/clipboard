@@ -106,3 +106,50 @@ describe('normalizeEntry', () => {
         expect(normalizeEntry({ text: 'x', deletedAt: 999 }).deletedAt).toBe(999);
     });
 });
+
+describe('undecryptable placeholders', () => {
+    it('normalizeEntry preserves a placeholder rather than dropping it for having no text', () => {
+        const placeholder = {
+            id: 'abcdefgh', text: null, frequency: 0, timestamp: 1, updatedAt: 2,
+            order: 0, deletedAt: null, undecryptable: true
+        };
+        const normalized = normalizeEntry(placeholder);
+        expect(normalized).not.toBeNull();
+        expect(normalized.text).toBeNull();
+        expect(normalized.undecryptable).toBe(true);
+    });
+
+    it('survives a full migrateToV2 pass unchanged', () => {
+        const placeholder = {
+            id: 'abcdefgh', text: null, frequency: 0, timestamp: 1, updatedAt: 2,
+            order: 0, deletedAt: null, undecryptable: true
+        };
+        const [migrated] = migrateToV2([placeholder]);
+        expect(migrated.undecryptable).toBe(true);
+        expect(migrated.text).toBeNull();
+    });
+
+    it('an ordinary entry with null text and no undecryptable flag is still rejected', () => {
+        // Guards against a bug where any null-text object slips through —
+        // only an explicit undecryptable:true bypasses the text requirement.
+        expect(normalizeEntry({ id: 'abcdefgh', text: null })).toBeNull();
+    });
+
+    it('dedupKey never matches a placeholder against real content', () => {
+        const placeholder = normalizeEntry({
+            id: 'abcdefgh', undecryptable: true, updatedAt: 1, timestamp: 1
+        });
+        const real = newEntry('some real text');
+        expect(dedupKey(placeholder)).not.toBe(dedupKey(real));
+    });
+
+    it('two different placeholders never collide on dedupKey', () => {
+        const a = normalizeEntry({ id: 'aaaaaaaa', undecryptable: true });
+        const b = normalizeEntry({ id: 'bbbbbbbb', undecryptable: true });
+        expect(dedupKey(a)).not.toBe(dedupKey(b));
+    });
+
+    it('newEntry marks ordinary entries as decryptable', () => {
+        expect(newEntry('hello').undecryptable).toBe(false);
+    });
+});

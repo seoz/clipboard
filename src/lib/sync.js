@@ -384,31 +384,60 @@ async function mergeRemoteDocs(docs, key) {
 
     let applied = 0;
     let maxSeen = 0;
+    let dirty = false;
     const decryptFailures = [];
 
     for (const docSnap of docs) {
         const remote = docSnap.data();
-        maxSeen = Math.max(maxSeen, remote.updatedAt);
-
         const local = byId.get(docSnap.id);
 
         // Local is strictly newer: it will reach the server on its own via
         // push(), so pulling the older remote value here would just be undone
-        // a moment later. Skip rather than clobber.
-        if (local && local.updatedAt > remote.updatedAt) continue;
+        // a moment later. Skip rather than clobber — and this counts as fully
+        // resolved, so the cursor is free to move past it.
+        if (local && local.updatedAt > remote.updatedAt) {
+            maxSeen = Math.max(maxSeen, remote.updatedAt);
+            continue;
+        }
 
         let incoming;
         try {
             incoming = await toLocal(docSnap.id, remote, key);
         } catch {
             decryptFailures.push(docSnap.id);
+            // Deliberately do NOT advance maxSeen past this document. The
+            // delta query is `updatedAt > cursor`, so moving the cursor past
+            // an entry we could not read would drop it from every future
+            // pull too — permanently, if the failure was transient (a stale
+            // cached key mid-passphrase-rotation, say). Leaving the cursor
+            // behind costs one extra re-fetch per pull until it resolves,
+            // which is cheap.
+            if (!local) {
+                // Never seen locally at all: without a placeholder the entry
+                // is invisible, which is a worse failure mode than a visibly
+                // broken row. Only for a brand-new id — an existing local
+                // entry that fails to decrypt keeps showing its last-known-
+                // good content instead of being replaced with a warning.
+                const placeholder = {
+                    id: docSnap.id, text: null, frequency: 0,
+                    timestamp: remote.createdAt, updatedAt: remote.updatedAt,
+                    order: remote.order, deletedAt: remote.deletedAt ?? null,
+                    undecryptable: true
+                };
+                texts.push(placeholder);
+                byId.set(docSnap.id, placeholder);
+                dirty = true;
+            }
             continue;
         }
+
+        maxSeen = Math.max(maxSeen, remote.updatedAt);
 
         if (!local) {
             texts.push(incoming);
             byId.set(docSnap.id, incoming);
             applied++;
+            dirty = true;
             continue;
         }
 
@@ -420,11 +449,13 @@ async function mergeRemoteDocs(docs, key) {
             || (remote.updatedAt === local.updatedAt && incoming.text > local.text);
         if (!remoteWins) continue;
 
-        Object.assign(local, incoming);
+        // A successful decrypt clears any earlier placeholder for this id.
+        Object.assign(local, incoming, { undecryptable: false });
         applied++;
+        dirty = true;
     }
 
-    if (applied > 0) {
+    if (dirty) {
         // These came FROM the server: saving them locally must not re-queue
         // them for a push, or every pull would trigger a needless echo.
         await saveState({ texts, sortMode });

@@ -41,6 +41,7 @@ export function newEntry(text, overrides = {}) {
         updatedAt: now,
         order: now,
         deletedAt: null,
+        undecryptable: false,
         ...overrides
     };
 }
@@ -56,10 +57,17 @@ export function normalizeEntry(raw, fallbackOrder = 0) {
         return text ? newEntry(text, { order: fallbackOrder }) : null;
     }
 
-    if (!raw || typeof raw !== 'object' || typeof raw.text !== 'string') return null;
+    if (!raw || typeof raw !== 'object') return null;
 
-    const text = raw.text.trim();
-    if (!text) return null;
+    // An entry the sync engine could not decrypt: real, present on the
+    // server, but with no readable text on this device. `text` is `null`
+    // rather than absent, and must not be coerced or dropped — that would
+    // silently erase the only visible trace that the entry exists at all.
+    const undecryptable = raw.undecryptable === true;
+    if (!undecryptable && typeof raw.text !== 'string') return null;
+
+    const text = undecryptable ? null : raw.text.trim();
+    if (!undecryptable && !text) return null;
 
     const now = Date.now();
     const timestamp = Number.isFinite(raw.timestamp) ? raw.timestamp : now;
@@ -71,7 +79,8 @@ export function normalizeEntry(raw, fallbackOrder = 0) {
         timestamp,
         updatedAt: Number.isFinite(raw.updatedAt) ? raw.updatedAt : timestamp,
         order: Number.isFinite(raw.order) ? raw.order : fallbackOrder,
-        deletedAt: Number.isFinite(raw.deletedAt) ? raw.deletedAt : null
+        deletedAt: Number.isFinite(raw.deletedAt) ? raw.deletedAt : null,
+        undecryptable
     };
 }
 
@@ -95,6 +104,9 @@ export function migrateToV2(rawList) {
  * snippets.
  */
 export function dedupKey(entry) {
+    // An undecryptable entry has no readable text to compare, so it can never
+    // match anything by content — it can only ever be treated as unmatched.
+    if (entry.undecryptable) return `__undecryptable__:${entry.id}`;
     return entry.text.trim().normalize('NFC');
 }
 

@@ -114,6 +114,20 @@
             <p class="status" id="cryptoStatus" role="status" aria-live="polite"></p>
         </section>
 
+        <section class="card" id="mergeCard" hidden>
+            <h2>Combine with this device</h2>
+            <p class="muted" id="mergeSummary"></p>
+            <div class="warning" id="mergeWarning" hidden>
+                This can't be undone. Consider exporting a backup first, from
+                the extension popup's 💾 button.
+            </div>
+            <div class="button-row">
+                <button id="confirmMergeBtn" class="primary-btn">Combine</button>
+                <button id="cancelMergeBtn" class="secondary-btn">Not now</button>
+            </div>
+            <p class="status" id="mergeStatus" role="status" aria-live="polite"></p>
+        </section>
+
         <section class="card" id="diagnosticsCard" hidden>
             <h2>Diagnostics</h2>
             <p class="muted">

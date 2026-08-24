@@ -20,6 +20,10 @@ import { MSG } from '../shared/messages.js';
 
 const LOCK_POLICY_KEY = 'lockPolicy';
 
+/** Holds the plan between "preview" and "commit" — nothing is applied until
+ *  the user has seen it and clicked Combine. */
+let pendingMergePlan = null;
+
 let account = null;   // the users/{uid} doc, or null if never set up
 let activeUid = null;
 
@@ -74,7 +78,7 @@ async function storedLockPolicy() {
 async function renderEncryption(user) {
     const card = el('encryptionCard');
     card.hidden = !user;
-    if (!user) return;
+    if (!user) return false;
 
     const unlocked = Boolean(await getCachedKey(user.uid));
 
@@ -87,6 +91,8 @@ async function renderEncryption(user) {
         el('lockPolicy').value = policy;
         el('lockPolicyHint').textContent = describeLockPolicy(policy);
     }
+
+    return unlocked;
 }
 
 async function renderUser(user) {
@@ -107,7 +113,10 @@ async function renderUser(user) {
         el('accountEmail').textContent = user.email ?? user.uid;
     }
 
-    await renderEncryption(user);
+    const unlocked = await renderEncryption(user);
+    // Covers reopening the options page while already unlocked from a prior
+    // session — e.g. the tab was closed before a first merge was confirmed.
+    if (unlocked) await maybeOfferMerge();
 }
 
 async function handleSignIn() {
@@ -173,6 +182,81 @@ function refreshSetupButton() {
     el('enableEncryptionBtn').disabled = !setupFormValid();
 }
 
+/**
+ * Ask the worker whether this device has anything to converge with the
+ * server, and if so, put the confirmation card in front of the user rather
+ * than applying anything automatically — this is the one merge step that can
+ * silently combine two entries someone meant to keep separate.
+ */
+async function maybeOfferMerge() {
+    let response;
+    try {
+        response = await chrome.runtime.sendMessage({ type: MSG.PREVIEW_MERGE });
+    } catch (error) {
+        console.error('Merge preview failed:', error);
+        return;
+    }
+
+    if (response.outcome === 'wrong-passphrase') {
+        setCryptoStatus(
+            "Some entries on the server couldn't be decrypted with this passphrase. " +
+            'Unlocking is safe, but nothing was combined — see Diagnostics.', 'error');
+        return;
+    }
+    if (response.outcome !== 'merge-ready') return;   // locked / signed-out / error: nothing to show
+
+    const { plan } = response;
+
+    // Nothing to converge — apply silently rather than interrupting the user
+    // with an empty dialog. Still has to run once, to record that this device
+    // has merged and stop offering it again.
+    if (plan.localCount === 0 && plan.remoteCount === 0) {
+        await chrome.runtime.sendMessage({ type: MSG.APPLY_MERGE, plan });
+        return;
+    }
+
+    pendingMergePlan = plan;
+    el('mergeCard').hidden = false;
+    el('mergeWarning').hidden = plan.localCount === 0;   // nothing local to lose
+    el('mergeSummary').textContent =
+        `This device has ${plan.localCount} snippet${plan.localCount === 1 ? '' : 's'}, ` +
+        `and the server has ${plan.remoteCount}` +
+        (plan.duplicates > 0 ? `, ${plan.duplicates} of which look identical` : '') +
+        `. Combining them leaves ${plan.resultCount} total.`;
+}
+
+async function handleConfirmMerge() {
+    if (!pendingMergePlan) return;
+    const button = el('confirmMergeBtn');
+    button.disabled = true;
+    el('mergeStatus').textContent = 'Combining…';
+    el('mergeStatus').dataset.kind = '';
+
+    try {
+        const result = await chrome.runtime.sendMessage({
+            type: MSG.APPLY_MERGE, plan: pendingMergePlan
+        });
+        if (result.outcome !== 'merged') throw new Error(result.message || 'Merge failed');
+
+        pendingMergePlan = null;
+        el('mergeCard').hidden = true;
+        setCryptoStatus(`Combined — ${result.count} snippets, now syncing.`, 'ok');
+    } catch (error) {
+        console.error('Merge failed:', error);
+        el('mergeStatus').textContent = describe(error);
+        el('mergeStatus').dataset.kind = 'error';
+    } finally {
+        button.disabled = false;
+    }
+}
+
+function handleCancelMerge() {
+    // Declining just hides the card; nothing has been written, and the next
+    // unlock or sign-in will offer the same plan again.
+    pendingMergePlan = null;
+    el('mergeCard').hidden = true;
+}
+
 async function handleEnableEncryption() {
     const passphrase = el('newPassphrase').value;
     const confirm = el('confirmPassphrase').value;
@@ -199,6 +283,7 @@ async function handleEnableEncryption() {
 
         await renderEncryption({ uid: activeUid });
         setCryptoStatus('Passphrase set. This device is unlocked.', 'ok');
+        await maybeOfferMerge();
     } catch (error) {
         console.error('Enabling encryption failed:', error);
         setCryptoStatus(describe(error), 'error');
@@ -228,6 +313,7 @@ async function handleUnlock() {
         el('unlockPassphrase').value = '';
         await renderEncryption({ uid: activeUid });
         setCryptoStatus('Unlocked.', 'ok');
+        await maybeOfferMerge();
     } catch (error) {
         console.error('Unlock failed:', error);
         setCryptoStatus(describe(error), 'error');
@@ -377,6 +463,8 @@ async function main() {
     el('enableEncryptionBtn').addEventListener('click', handleEnableEncryption);
     el('unlockBtn').addEventListener('click', handleUnlock);
     el('lockNowBtn').addEventListener('click', handleLockNow);
+    el('confirmMergeBtn').addEventListener('click', handleConfirmMerge);
+    el('cancelMergeBtn').addEventListener('click', handleCancelMerge);
     el('lockPolicy').addEventListener('change', handleLockPolicyChange);
     ['newPassphrase', 'confirmPassphrase', 'ackLoss'].forEach(id =>
         el(id).addEventListener('input', refreshSetupButton));

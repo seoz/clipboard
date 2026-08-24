@@ -70,6 +70,12 @@ class TextManager {
             this.syncEnabled = true;
             button.hidden = false;
 
+            // Nudge a push+pull cycle on open, so a change made on another
+            // device shows up here without waiting for this device's own next
+            // edit. The worker still can't run sooner than its ~30s alarm
+            // floor, but this ensures a cycle is scheduled at all.
+            this.requestSync();
+
             const { pending = 0 } = await chrome.runtime.sendMessage({ type: MSG.SYNC_STATUS }) ?? {};
             button.dataset.state = pending > 0 ? 'pending' : 'synced';
             button.title = pending > 0

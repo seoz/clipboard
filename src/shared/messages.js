@@ -4,5 +4,7 @@ export const MSG = {
     FLUSH_NOW: 'FLUSH_NOW',        // awaited: push immediately
     AUTH_STATUS: 'AUTH_STATUS',    // who is signed in, if anyone
     SYNC_STATUS: 'SYNC_STATUS',    // how many changes are waiting to upload
-    VERIFY_SYNC: 'VERIFY_SYNC'     // read the server back and compare with local
+    VERIFY_SYNC: 'VERIFY_SYNC',    // read the server back and compare with local
+    PREVIEW_MERGE: 'PREVIEW_MERGE', // build a first-merge plan without applying it
+    APPLY_MERGE: 'APPLY_MERGE'      // commit a plan the user has already seen
 };

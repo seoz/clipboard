@@ -13,11 +13,27 @@ const remote = new Map();
 
 vi.mock('firebase/firestore/lite', () => ({
     doc: (_ref, id) => ({ id }),
-    collection: (_db, ...path) => ({ path: path.join('/') }),
-    getDocs: async () => ({
-        size: remote.size,
-        docs: [...remote.entries()].map(([id, data]) => ({ id, data: () => data }))
-    }),
+    collection: (_db, ...path) => ({ path: path.join('/'), __constraints: [] }),
+    query: (ref, ...constraints) => ({ __constraints: constraints }),
+    where: (field, op, value) => ({ type: 'where', field, op, value }),
+    orderBy: field => ({ type: 'orderBy', field }),
+    deleteDoc: async ref => { remote.delete(ref.id); },
+    getDocs: async target => {
+        let entries = [...remote.entries()];
+        for (const c of target.__constraints ?? []) {
+            if (c.type === 'where' && c.op === '>') {
+                entries = entries.filter(([, data]) => data[c.field] > c.value);
+            }
+            if (c.type === 'orderBy') {
+                entries = entries.slice().sort((a, b) => a[1][c.field] - b[1][c.field]);
+            }
+        }
+        return {
+            size: entries.length,
+            empty: entries.length === 0,
+            docs: entries.map(([id, data]) => ({ id, data: () => data }))
+        };
+    },
     writeBatch: () => {
         const writes = [];
         return {
@@ -55,9 +71,18 @@ vi.mock('../src/lib/crypto.js', () => ({
 }));
 
 let texts = [];
-vi.mock('../src/lib/store.js', () => ({ loadState: async () => ({ texts, sortMode: 'manual' }) }));
+const savedStateCalls = [];
+vi.mock('../src/lib/store.js', () => ({
+    loadState: async () => ({ texts, sortMode: 'manual' }),
+    saveState: async ({ texts: t, sortMode, dirtyIds = [] }) => {
+        texts = t;
+        savedStateCalls.push({ sortMode, dirtyIds });
+    }
+}));
 
-const { push, verify, SyncOutcome } = await import('../src/lib/sync.js');
+const {
+    push, pull, verify, previewFirstMerge, applyFirstMerge, gcTombstones, SyncOutcome
+} = await import('../src/lib/sync.js');
 const queue = await import('../src/lib/queue.js');
 
 const entry = (id, over = {}) => ({
@@ -79,6 +104,7 @@ beforeEach(() => {
     commits.length = 0;
     commitError = null;
     failCommitAt = null;
+    savedStateCalls.length = 0;
     user = { uid: 'uid-1' };
     key = 'fake-key';
     texts = [];
@@ -329,5 +355,266 @@ describe('verify', () => {
         seal('a', 'z'.repeat(200));
         const report = await verify();
         expect(report.contentMismatch[0].local.length).toBeLessThanOrEqual(33);
+    });
+});
+
+/** Seal a payload into the fake `remote` store, the same shape push writes. */
+function sealRemote(id, text, frequency, over = {}) {
+    remote.set(id, {
+        v: 1, iv: 'IV',
+        ct: Buffer.from(JSON.stringify({ value: { text, frequency }, aad: id })).toString('base64'),
+        order: 0, createdAt: 1000, updatedAt: 2000, deletedAt: null, ...over
+    });
+}
+
+describe('pull', () => {
+    it('tells a never-merged device to run the first-merge flow instead', async () => {
+        // getLastPullAt() defaults to 0, which is the "never merged" signal.
+        sealRemote('a', 'text a', 0);
+        expect((await pull()).outcome).toBe(SyncOutcome.NEEDS_FIRST_MERGE);
+        expect(texts).toEqual([]);   // nothing applied — first-merge owns this
+    });
+
+    it('does nothing signed out or locked', async () => {
+        await queue.setLastPullAt(1000);
+        user = null;
+        expect((await pull()).outcome).toBe(SyncOutcome.SIGNED_OUT);
+        user = { uid: 'uid-1' };
+        key = null;
+        expect((await pull()).outcome).toBe(SyncOutcome.LOCKED);
+    });
+
+    it('reports nothing-to-do when there is no newer remote data', async () => {
+        await queue.setLastPullAt(9999);
+        expect((await pull()).outcome).toBe(SyncOutcome.NOTHING_TO_DO);
+    });
+
+    it('adds an entry that only exists on another device', async () => {
+        await queue.setLastPullAt(1000);
+        sealRemote('a', 'from device B', 3, { updatedAt: 2000 });
+
+        const result = await pull();
+        expect(result.outcome).toBe(SyncOutcome.PULLED);
+        expect(result.applied).toBe(1);
+        expect(texts).toHaveLength(1);
+        expect(texts[0]).toMatchObject({ id: 'a', text: 'from device B', frequency: 3 });
+        // Pulled entries must not be re-queued for push — they came FROM the
+        // server, so saveState is called without dirtyIds at all.
+        expect(savedStateCalls[0].dirtyIds).toEqual([]);
+    });
+
+    it('overwrites a local entry when the remote copy is newer', async () => {
+        texts = [entry('a', { text: 'old', updatedAt: 1000 })];
+        await queue.setLastPullAt(500);
+        sealRemote('a', 'new from elsewhere', 0, { updatedAt: 2000 });
+
+        await pull();
+        expect(texts[0].text).toBe('new from elsewhere');
+    });
+
+    it('keeps the local copy when it is strictly newer than the remote one', async () => {
+        texts = [entry('a', { text: 'newer locally', updatedAt: 5000 })];
+        await queue.setLastPullAt(500);
+        sealRemote('a', 'stale', 0, { updatedAt: 2000 });
+
+        const result = await pull();
+        expect(texts[0].text).toBe('newer locally');
+        // Nothing changed locally, so nothing should have been written back.
+        expect(savedStateCalls).toHaveLength(0);
+        expect(result.applied).toBe(0);
+    });
+
+    it('breaks a genuine tie deterministically, the same way on both sides', async () => {
+        texts = [entry('a', { text: 'aaa', updatedAt: 2000 })];
+        await queue.setLastPullAt(500);
+        sealRemote('a', 'zzz', 0, { updatedAt: 2000 });   // exact same updatedAt
+
+        await pull();
+        // 'zzz' > 'aaa' lexicographically, so remote wins this tie.
+        expect(texts[0].text).toBe('zzz');
+    });
+
+    it('propagates a delete as a tombstone, not a removal', async () => {
+        texts = [entry('a', { text: 'gone soon', updatedAt: 1000, deletedAt: null })];
+        await queue.setLastPullAt(500);
+        sealRemote('a', 'gone soon', 0, { updatedAt: 2000, deletedAt: 2000 });
+
+        await pull();
+        expect(texts[0].deletedAt).toBe(2000);
+        expect(texts).toHaveLength(1);   // still present, just tombstoned
+    });
+
+    it('reports an undecryptable record without losing the rest of the batch', async () => {
+        texts = [entry('a'), entry('b')];
+        await queue.setLastPullAt(500);
+        sealRemote('a', 'fine', 0, { updatedAt: 5000 });   // unambiguously newer
+        remote.set('bad', {
+            v: 1, iv: 'IV',
+            ct: Buffer.from(JSON.stringify({ value: { text: 'x' }, aad: 'someone-else' })).toString('base64'),
+            order: 0, createdAt: 1000, updatedAt: 2000, deletedAt: null
+        });
+
+        const result = await pull();
+        expect(result.decryptFailures).toEqual(['bad']);
+        expect(texts.find(t => t.id === 'a').text).toBe('fine');
+    });
+
+    it('advances the pull cursor to the newest updatedAt actually seen', async () => {
+        await queue.setLastPullAt(500);
+        sealRemote('a', 'x', 0, { updatedAt: 1000 });
+        sealRemote('b', 'y', 0, { updatedAt: 7000 });
+
+        await pull();
+        expect(await queue.getLastPullAt()).toBe(7000);
+    });
+
+    it('falls back to a full read when this device has gone stale', async () => {
+        const thirtyOneDaysAgo = Date.now() - 31 * 24 * 60 * 60 * 1000;
+        await queue.setLastPullAt(thirtyOneDaysAgo);
+        sealRemote('a', 'old but still valid', 0, { updatedAt: thirtyOneDaysAgo - 1000 });
+
+        // A plain delta query (updatedAt > cursor) would miss this, since it
+        // predates the cursor; the stale path must read everything instead.
+        const result = await pull();
+        expect(result.stale).toBe(true);
+        expect(texts.find(t => t.id === 'a')).toBeTruthy();
+    });
+});
+
+describe('previewFirstMerge / applyFirstMerge', () => {
+    it('refuses signed out or locked', async () => {
+        user = null;
+        expect((await previewFirstMerge()).outcome).toBe(SyncOutcome.SIGNED_OUT);
+        user = { uid: 'uid-1' };
+        key = null;
+        expect((await previewFirstMerge()).outcome).toBe(SyncOutcome.LOCKED);
+    });
+
+    it('aborts entirely if any remote entry fails to decrypt', async () => {
+        sealRemote('a', 'fine', 0);
+        remote.set('bad', {
+            v: 1, iv: 'IV',
+            ct: Buffer.from(JSON.stringify({ value: { text: 'x' }, aad: 'wrong' })).toString('base64'),
+            order: 0, createdAt: 1000, updatedAt: 2000, deletedAt: null
+        });
+
+        const result = await previewFirstMerge();
+        expect(result.outcome).toBe(SyncOutcome.WRONG_PASSPHRASE);
+    });
+
+    it('fuses entries with identical text, keeping the remote id', async () => {
+        texts = [entry('local-1', { text: 'shared snippet', frequency: 2, timestamp: 500 })];
+        sealRemote('remote-1', 'shared snippet', 5, { createdAt: 900, order: 42 });
+
+        const { plan } = await previewFirstMerge();
+        expect(plan.duplicates).toBe(1);
+        expect(plan.merged).toHaveLength(1);
+
+        const fused = plan.merged[0];
+        expect(fused.id).toBe('remote-1');              // remote id wins
+        expect(fused.frequency).toBe(5);                // max(2, 5)
+        expect(fused.timestamp).toBe(500);               // min(500, 900)
+        expect(fused.order).toBe(42);                     // remote's order
+        expect(plan.dirtyIds).toContain('remote-1');       // fused id still needs push
+    });
+
+    it('keeps a local-only entry, giving it a fresh order past the remote range', async () => {
+        texts = [entry('local-1', { text: 'only here', order: 999999 })];
+        sealRemote('remote-1', 'unrelated', 0, { order: 5000 });
+
+        const { plan } = await previewFirstMerge();
+        const local = plan.merged.find(e => e.id === 'local-1');
+        expect(local.order).toBeGreaterThan(5000);
+        expect(plan.dirtyIds).toContain('local-1');
+    });
+
+    it('keeps a remote-only entry without marking it dirty', async () => {
+        sealRemote('remote-1', 'from another device', 0);
+
+        const { plan } = await previewFirstMerge();
+        expect(plan.merged.map(e => e.id)).toEqual(['remote-1']);
+        // Already correct on the server — pushing it again would be wasted work.
+        expect(plan.dirtyIds).not.toContain('remote-1');
+    });
+
+    it('does not dedup against a tombstoned remote entry', async () => {
+        texts = [entry('local-1', { text: 'was deleted elsewhere' })];
+        sealRemote('remote-1', 'was deleted elsewhere', 0, { deletedAt: 5000 });
+
+        const { plan } = await previewFirstMerge();
+        // No fusing: the local live entry and the remote tombstone both survive
+        // as distinct entries rather than the local one vanishing into a delete.
+        expect(plan.duplicates).toBe(0);
+        expect(plan.merged).toHaveLength(2);
+    });
+
+    it('drops local tombstones — nothing in them is worth preserving', async () => {
+        texts = [entry('local-1', { deletedAt: 1000 })];
+        const { plan } = await previewFirstMerge();
+        expect(plan.merged).toHaveLength(0);
+    });
+
+    it('does not write anything until applyFirstMerge is called', async () => {
+        texts = [entry('local-1', { text: 'unmerged' })];
+        await previewFirstMerge();
+        expect(savedStateCalls).toHaveLength(0);
+        expect(texts.find(t => t.id === 'local-1')).toBeTruthy();   // untouched
+    });
+
+    it('applies the plan and marks this device as merged', async () => {
+        texts = [entry('local-1', { text: 'mine' })];
+        sealRemote('remote-1', 'theirs', 0, { updatedAt: 3000 });
+
+        const { plan } = await previewFirstMerge();
+        const result = await applyFirstMerge(plan);
+
+        expect(result.outcome).toBe(SyncOutcome.MERGED);
+        expect(texts).toHaveLength(2);
+        expect(savedStateCalls[0].dirtyIds).toEqual(plan.dirtyIds);
+        expect(await queue.getLastPullAt()).toBeGreaterThan(0);
+    });
+
+    it('marks an empty merge as done too, so it is not offered forever', async () => {
+        texts = [];
+        const { plan } = await previewFirstMerge();
+        expect(plan.merged).toHaveLength(0);
+
+        await applyFirstMerge(plan);
+        // Falls back to "now" rather than 0 — see the comment in applyFirstMerge.
+        expect(await queue.getLastPullAt()).toBeGreaterThan(0);
+    });
+});
+
+describe('gcTombstones', () => {
+    const DAY = 24 * 60 * 60 * 1000;
+
+    it('removes only tombstones older than the retention window', async () => {
+        sealRemote('old-tombstone', 'x', 0, { deletedAt: Date.now() - 31 * DAY });
+        sealRemote('recent-tombstone', 'y', 0, { deletedAt: Date.now() - 1 * DAY });
+        sealRemote('still-live', 'z', 0, { deletedAt: null });
+        texts = [
+            entry('old-tombstone', { deletedAt: Date.now() - 31 * DAY }),
+            entry('recent-tombstone', { deletedAt: Date.now() - 1 * DAY }),
+            entry('still-live')
+        ];
+
+        const result = await gcTombstones();
+        expect(result.removed).toBe(1);
+        expect(remote.has('old-tombstone')).toBe(false);
+        expect(remote.has('recent-tombstone')).toBe(true);
+        expect(remote.has('still-live')).toBe(true);
+        expect(texts.map(t => t.id)).toEqual(['recent-tombstone', 'still-live']);
+    });
+
+    it('does nothing when there is nothing old enough to collect', async () => {
+        sealRemote('a', 'x', 0, { deletedAt: null });
+        const result = await gcTombstones();
+        expect(result.removed).toBe(0);
+        expect(savedStateCalls).toHaveLength(0);   // no needless write
+    });
+
+    it('refuses signed out', async () => {
+        user = null;
+        expect((await gcTombstones()).outcome).toBe(SyncOutcome.SIGNED_OUT);
     });
 });

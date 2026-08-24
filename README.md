@@ -53,6 +53,13 @@ when you want to pick up updates.
 
 ## Usage
 
+On macOS, press **Control+Command+C** to open QuickPaste from anywhere —
+no need to click the toolbar icon first. You can change or remove this at
+`chrome://extensions/shortcuts`. It's Mac-only: Chrome doesn't support
+combining the Ctrl and Command modifiers on other platforms, so there's no
+default binding on Windows/Linux/ChromeOS — set one yourself at that same
+page if you want one there.
+
 1. Click the extension icon in your Chrome toolbar
 2. Click the "+" button to add new text
 3. Click on any text item to copy it to clipboard

@@ -25,6 +25,13 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "mac": "MacCtrl+Command+C"
+      }
+    }
+  },
   "host_permissions": [
     "https://identitytoolkit.googleapis.com/*",
     "https://securetoken.googleapis.com/*",

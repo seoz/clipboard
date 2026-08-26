@@ -67,6 +67,7 @@ page if you want one there.
 5. Use the delete button to remove texts
 6. Use the search box to filter texts
 7. Use ↑/↓ to move through the list and Enter to copy the highlighted item
+8. Press **/** anywhere in the popup to jump straight to the search box
 
 ### Sorting and reordering
 

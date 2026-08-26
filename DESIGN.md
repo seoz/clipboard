@@ -92,6 +92,8 @@ The 100ms self-close is worth noting for §8: it means a network write started h
 ### 4.3 Search/filter
 `filterTexts` used to be a DOM-level filter that read `.text-content` back out of already-rendered nodes and toggled `display`. It now sets a `searchTerm` on the model and re-renders from `visibleTexts()`, debounced 120ms. Filtering the model rather than the DOM matters for two reasons: it removes a 500-node DOM read per keystroke, and it lets search reach entries that the render limit (§5) is currently holding back. Keyboard navigation reads the rendered array directly instead of re-querying the DOM for `display !== 'none'`.
 
+`/` focuses the search box from anywhere in the popup. The handler is a document-level `keydown` that bails when the modal is open or when the event target is an input, textarea, select, or contenteditable — otherwise the shortcut would swallow a literal slash typed into the snippet editor or the search box itself. Modifier combinations (Ctrl/Cmd/Alt + `/`) are left alone so browser and OS bindings still work.
+
 ### 4.4 Import / export
 Export writes `{ version, exportedAt, entries }` and **keeps ids**, so re-importing a backup is idempotent rather than duplicating everything. Tombstones are excluded. Import sniffs `Array.isArray(parsed)` to accept the legacy bare-array format, routes every element through the same `migrateToV2()` the loader uses — the coercion logic is no longer duplicated between the two paths — skips ids already present, and stops at the item cap.
 

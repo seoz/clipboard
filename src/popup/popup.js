@@ -14,6 +14,13 @@ const LOCAL_MAX_TEXTS = 20;
 
 const SEARCH_DEBOUNCE_MS = 120;
 
+/** True when the keystroke belongs to a field the user is typing in. */
+function isTypingTarget(el) {
+    if (!el) return false;
+    const tag = el.tagName;
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+}
+
 class TextManager {
     constructor() {
         this.texts = [];
@@ -260,6 +267,18 @@ class TextManager {
 
         document.addEventListener('keydown', e => {
             if (e.key === 'Escape') this.closeModal();
+        });
+
+        // "/" jumps to search, the way it does in most list UIs. Ignored while
+        // typing so the character still reaches whatever field has focus.
+        document.addEventListener('keydown', e => {
+            if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
+            if (document.getElementById('textModal').style.display === 'block') return;
+            if (isTypingTarget(e.target)) return;
+            e.preventDefault();
+            const input = document.getElementById('searchInput');
+            input.focus();
+            input.select();
         });
 
         this.setupContainerDelegation();
